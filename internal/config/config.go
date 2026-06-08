@@ -46,11 +46,12 @@ type Monitor struct {
 	CreditAsOf    string  `yaml:"credit_as_of"` // "2006-01-02" or RFC3339
 
 	// Subscription / OAuth providers.
-	OAuth       bool   `yaml:"oauth"`        // use the interactive OAuth flow
-	BearerToken string `yaml:"bearer_token"` // x.ai: pre-obtained session/bearer token
-	TokenFile   string `yaml:"token_file"`   // x.ai: read a live token from a JSON file (e.g. ~/.hermes/auth.json)
-	UsageURL    string `yaml:"usage_url"`    // override the usage endpoint
-	BaseURL     string `yaml:"base_url"`     // override the API base (testing / proxies)
+	OAuth        bool   `yaml:"oauth"`         // use the interactive OAuth flow
+	BearerToken  string `yaml:"bearer_token"`  // x.ai: pre-obtained session/bearer token
+	TokenFile    string `yaml:"token_file"`    // x.ai: read a live token from a JSON file (e.g. ~/.hermes/auth.json)
+	UsageURL     string `yaml:"usage_url"`     // override the usage endpoint
+	AuthorizeURL string `yaml:"authorize_url"` // override the OAuth authorize host (claude/xai)
+	BaseURL      string `yaml:"base_url"`      // override the API base (testing / proxies)
 }
 
 // IsEnabled reports whether the monitor should be polled (default true).

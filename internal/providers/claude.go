@@ -39,6 +39,7 @@ type claude struct {
 	label    string
 	oauth    *oauth.Manager
 	usageURL string
+	authURL  string // authorize endpoint (override via config authorize_url)
 }
 
 func newClaude(m config.Monitor, mgr *oauth.Manager) *claude {
@@ -46,7 +47,11 @@ func newClaude(m config.Monitor, mgr *oauth.Manager) *claude {
 	if usage == "" {
 		usage = claudeDefaultUsageURL
 	}
-	return &claude{label: m.Label, oauth: mgr, usageURL: usage}
+	authURL := m.AuthorizeURL
+	if authURL == "" {
+		authURL = claudeAuthorize
+	}
+	return &claude{label: m.Label, oauth: mgr, usageURL: usage, authURL: authURL}
 }
 
 func (c *claude) ID() string    { return "claude" }
@@ -57,7 +62,7 @@ func (c *claude) Manual() bool  { return true }
 func (c *claude) OAuthConfig() oauth.Config {
 	return oauth.Config{
 		Provider:     c.ID(),
-		AuthorizeURL: claudeAuthorize,
+		AuthorizeURL: c.authURL,
 		TokenURL:     claudeTokenURL,
 		ClientID:     claudeClientID,
 		// The live Claude Code binary requests this exact 6-scope union (order
