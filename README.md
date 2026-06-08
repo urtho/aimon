@@ -19,13 +19,17 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 |---|---|---|---|
 | **DeepSeek** | Prepaid balance (`/user/balance`) | `api_key` | ✅ verified |
 | **OpenRouter** | Credit balance + rate-limit (`/credits`, `/key`) | `api_key` | ✅ verified |
-| **Anthropic API** | Month-to-date spend (Admin **cost report**) | `admin_key` (`sk-ant-admin-…`) | ✅ verified |
+| **Anthropic API** | Month-to-date spend, or **credits left** (baseline) | `admin_key` (`sk-ant-admin-…`) | ✅ verified |
 | **Claude Pro/Max** | Subscription connection (usage best-effort) | OAuth — connect in UI | 🔶 OAuth verified, usage best-effort |
 | **x.ai SuperGrok** | Billing-cycle usage (`GetGrokCreditsConfig`) | OAuth — connect in UI (or `token_file`/`bearer_token`) | ✅ |
 
-> **Anthropic** has no public *prepaid balance* API, so aimon reports
-> **month-to-date cost** from the Admin cost report instead (needs an
-> **Admin** key, not a regular API key).
+> **Anthropic** has no public *prepaid balance* API
+> ([open request](https://github.com/anthropics/anthropic-sdk-python/issues/505)),
+> so by default aimon reports **month-to-date cost** from the Admin cost report
+> (needs an **Admin** key, not a regular API key). To mirror the Console's
+> "credits left", set `credit_balance` + `credit_as_of` on the monitor — aimon
+> then shows `balance − exact spend since that date` (accurate until your next
+> top-up, at which point you bump the baseline).
 >
 > **Claude** uses the same OAuth client as Claude Code; the token exchange and
 > refresh are solid, but the subscription *usage* endpoint is not a stable

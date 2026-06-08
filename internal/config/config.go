@@ -38,6 +38,13 @@ type Monitor struct {
 	APIKey   string `yaml:"api_key"`   // DeepSeek, OpenRouter, x.ai
 	AdminKey string `yaml:"admin_key"` // Anthropic Admin API (sk-ant-admin-...)
 
+	// Anthropic has no public prepaid-balance API. Set credit_balance to the
+	// "credits left" shown in the Console and credit_as_of to the date you saw
+	// it; aimon then reports remaining = credit_balance − spend since that date
+	// (exact, from the cost report). Bump the baseline when you buy more credits.
+	CreditBalance float64 `yaml:"credit_balance"`
+	CreditAsOf    string  `yaml:"credit_as_of"` // "2006-01-02" or RFC3339
+
 	// Subscription / OAuth providers.
 	OAuth       bool   `yaml:"oauth"`        // use the interactive OAuth flow
 	BearerToken string `yaml:"bearer_token"` // x.ai: pre-obtained session/bearer token

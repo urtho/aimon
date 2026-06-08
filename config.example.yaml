@@ -21,11 +21,17 @@ monitors:
     label: "OpenRouter"
     api_key: "${OPENROUTER_API_KEY}"
 
-  # --- Anthropic API spend (Admin API, month-to-date cost) -----------------
+  # --- Anthropic API (Admin API) -------------------------------------------
   # Requires an Admin API key (sk-ant-admin-...), NOT a normal API key.
+  # Default: shows month-to-date spend (Anthropic has no public balance API).
+  # To show "credits left" like the Console: set credit_balance to the balance
+  # you saw and credit_as_of to that date — aimon reports remaining =
+  # credit_balance − spend since then. Bump it whenever you buy more credits.
   - provider: anthropic
     label: "Anthropic API"
     admin_key: "${ANTHROPIC_ADMIN_KEY}"
+    # credit_balance: 19.70
+    # credit_as_of: "2026-06-08"
 
   # --- Subscription usage via OAuth (best-effort) --------------------------
   # Claude Pro/Max: connect once at /  (Connect button) — opens the Anthropic
