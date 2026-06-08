@@ -107,7 +107,12 @@ func (m *Manager) StartFlow(ctx context.Context, label string, cfg Config, redir
 	if strings.Contains(cfg.AuthorizeURL, "?") {
 		sep = "&"
 	}
-	return cfg.AuthorizeURL + sep + q.Encode(), state, nil
+	// Encode spaces as %20, not '+'. In a URL query '+' is a literal plus (only
+	// form bodies treat it as space), and strict OIDC servers (Anthropic) reject
+	// a scope like "a+b+c" with "Invalid request format". url.Values.Encode only
+	// emits '+' for spaces (a literal '+' becomes %2B), so this swap is safe.
+	query := strings.ReplaceAll(q.Encode(), "+", "%20")
+	return cfg.AuthorizeURL + sep + query, state, nil
 }
 
 // Complete exchanges an authorization code for tokens and stores them. The code
