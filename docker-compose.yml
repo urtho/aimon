@@ -1,0 +1,56 @@
+# aimon — docker-compose
+#
+# Quick start:
+#   cp config.example.yaml config.yaml      # edit monitors
+#   cp .env.example .env                     # put your API keys here
+#   docker compose up -d --build
+#
+# The SQLite database lives in the bind-mounted ./data folder on the host, so it
+# survives container rebuilds. The container runs rootless; it runs as your host
+# UID/GID (default 1000) so it can write to ./data.
+
+services:
+  aimon:
+    build:
+      context: .
+      args:
+        VERSION: ${AIMON_VERSION:-compose}
+    image: ghcr.io/algonode/aimon:latest
+    container_name: aimon
+    restart: unless-stopped
+
+    # Run as the host user so the bind-mounted ./data is writable.
+    user: "${UID:-1000}:${GID:-1000}"
+
+    ports:
+      - "${AIMON_PORT:-8080}:8080"
+
+    environment:
+      AIMON_LOG: ${AIMON_LOG:-info}
+      AIMON_LISTEN: ":8080"
+      AIMON_DATABASE: "/data/aimon.db"
+
+    # Secrets referenced as ${...} inside config.yaml come from .env.
+    env_file:
+      - path: .env
+        required: false
+
+    volumes:
+      # Bind-mount the db folder (persists the SQLite database on the host).
+      - ./data:/data
+      # Bind-mount the config read-only.
+      - ./config.yaml:/etc/aimon/config.yaml:ro
+
+    # Read-only root FS (everything writable lives under the /data bind mount).
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      # Uses the binary itself (scratch has no shell/curl); aimon supports a
+      # lightweight liveness ping via the -healthcheck flag.
+      test: ["CMD", "/usr/local/bin/aimon", "-healthcheck", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -75,6 +75,15 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
+	// Environment overrides win over the file — handy for containers where the
+	// same config.yaml is bind-mounted but the DB must live under /data.
+	if v := os.Getenv("AIMON_LISTEN"); v != "" {
+		c.Listen = v
+	}
+	if v := os.Getenv("AIMON_DATABASE"); v != "" {
+		c.Database = v
+	}
+
 	if c.Listen == "" {
 		c.Listen = ":8080"
 	}

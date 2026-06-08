@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,7 +27,14 @@ var version = "dev"
 
 func main() {
 	cfgPath := flag.String("config", envOr("AIMON_CONFIG", "config.yaml"), "path to config.yaml")
+	healthcheck := flag.String("healthcheck", "", "probe a URL, exit 0 if healthy (for container HEALTHCHECK on scratch)")
 	flag.Parse()
+
+	// Self health-check mode: the scratch image has no shell/curl, so the binary
+	// probes itself when invoked with -healthcheck.
+	if *healthcheck != "" {
+		os.Exit(runHealthcheck(*healthcheck))
+	}
 
 	log := newLogger()
 	log.Info("aimon starting", "version", version, "config", *cfgPath)
@@ -101,6 +109,22 @@ func main() {
 		log.Error("graceful shutdown", "err", err)
 	}
 	log.Info("bye")
+}
+
+// runHealthcheck performs a one-shot GET and maps the result to an exit code.
+func runHealthcheck(url string) int {
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck:", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return 0
+	}
+	fmt.Fprintln(os.Stderr, "healthcheck: status", resp.StatusCode)
+	return 1
 }
 
 func envOr(key, def string) string {

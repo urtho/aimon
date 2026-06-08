@@ -1,0 +1,23 @@
+# VCS / tooling
+.git
+.github
+.claude
+.gitignore
+
+# secrets & local runtime state (never bake into the image)
+.env
+config.yaml
+data/
+*.db
+*.db-*
+
+# docs / scripts / build meta not needed by `go build`
+*.md
+*.sh
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# pre-built binaries
+/aimon
+/bin/
