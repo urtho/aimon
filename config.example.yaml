@@ -35,11 +35,14 @@ monitors:
     label: "Claude (Max)"
     oauth: true
 
-  # x.ai SuperGrok: no public consumer-usage API exists. With an API key this
-  # reports API-key status; set bearer_token + usage_url to poll a private
-  # grok.com/console usage endpoint if you have one.
+  # x.ai SuperGrok: click "Connect" in the UI to authorize via OAuth (PKCE) —
+  # aimon reads billing-cycle usage from the same grok.com endpoint the Grok
+  # CLI's /usage uses. Alternatives: point token_file at a credential file an
+  # external tool keeps refreshed, supply a static bearer_token, or fall back to
+  # api_key (which only reports API-key status, not SuperGrok usage).
   - provider: xai
     label: "SuperGrok (hermes)"
-    api_key: "${XAI_API_KEY}"
+    oauth: true
+    # token_file: "~/.hermes/auth.json"   # or ~/.grok/auth.json
     # bearer_token: "${XAI_SESSION_TOKEN}"
-    # usage_url: "https://api.x.ai/v1/..."
+    # api_key: "${XAI_API_KEY}"

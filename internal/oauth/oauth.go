@@ -33,6 +33,11 @@ type Config struct {
 	RedirectURI  string            // default redirect if the caller passes none
 	FormEncoded  bool              // true => application/x-www-form-urlencoded; false => JSON
 	ExtraAuth    map[string]string // extra params appended to the authorize URL
+	// Nonce adds a random `nonce` to the authorize request (OIDC; x.ai requires it).
+	Nonce bool
+	// ChallengeOnExchange re-sends code_challenge/method in the token request
+	// (some servers, e.g. auth.x.ai, expect it alongside code_verifier).
+	ChallengeOnExchange bool
 }
 
 // Manager runs OAuth flows and hands out fresh access tokens.
@@ -87,6 +92,13 @@ func (m *Manager) StartFlow(ctx context.Context, label string, cfg Config, redir
 	q.Set("state", state)
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
+	if cfg.Nonce {
+		nonce, nerr := randomB64(16)
+		if nerr != nil {
+			return "", "", nerr
+		}
+		q.Set("nonce", nonce)
+	}
 	for k, v := range cfg.ExtraAuth {
 		q.Set(k, v)
 	}
@@ -102,14 +114,7 @@ func (m *Manager) StartFlow(ctx context.Context, label string, cfg Config, redir
 // may be the raw value or the `code#state` form produced by the manual flow; in
 // the latter case the embedded state overrides the state argument.
 func (m *Manager) Complete(ctx context.Context, cfg Config, state, code string) error {
-	if i := strings.IndexByte(code, '#'); i >= 0 {
-		if embedded := code[i+1:]; embedded != "" {
-			state = embedded
-		}
-		code = code[:i]
-	}
-	code = strings.TrimSpace(code)
-	state = strings.TrimSpace(state)
+	code, state = parsePastedCode(code, state)
 
 	pending, err := m.store.TakePending(ctx, state)
 	if err != nil {
@@ -126,6 +131,10 @@ func (m *Manager) Complete(ctx context.Context, cfg Config, state, code string) 
 	}
 	if cfg.ClientSecret != "" {
 		body["client_secret"] = cfg.ClientSecret
+	}
+	if cfg.ChallengeOnExchange {
+		body["code_challenge"] = s256Challenge(pending.CodeVerifier)
+		body["code_challenge_method"] = "S256"
 	}
 
 	tok, err := m.exchange(ctx, cfg, body)
@@ -248,6 +257,41 @@ func (m *Manager) persist(ctx context.Context, provider, label string, tok *toke
 		Scope:        tok.Scope,
 		Raw:          string(rawJSON),
 	})
+}
+
+// parsePastedCode extracts the authorization code and state from whatever the
+// user pastes back: a bare code, Anthropic's `code#state`, a `code=…&state=…`
+// query string, or a full redirect URL (x.ai's loopback callback). fallback is
+// the state we generated, used when the pasted value doesn't carry one.
+func parsePastedCode(input, fallback string) (code, state string) {
+	input = strings.TrimSpace(input)
+	state = strings.TrimSpace(fallback)
+
+	// Full URL or bare query string carrying code=…&state=… (x.ai redirect).
+	if strings.Contains(input, "code=") {
+		qs := input
+		if i := strings.IndexAny(input, "?#"); i >= 0 {
+			qs = input[i+1:]
+		}
+		if v, err := url.ParseQuery(qs); err == nil {
+			if c := v.Get("code"); c != "" {
+				if s := v.Get("state"); s != "" {
+					state = s
+				}
+				return c, state
+			}
+		}
+	}
+
+	// Anthropic-style code#state.
+	if i := strings.IndexByte(input, '#'); i >= 0 {
+		if s := strings.TrimSpace(input[i+1:]); s != "" {
+			state = s
+		}
+		return strings.TrimSpace(input[:i]), state
+	}
+
+	return input, state
 }
 
 // randomB64 returns n random bytes as a base64url (no padding) string.

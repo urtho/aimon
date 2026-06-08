@@ -65,11 +65,13 @@
       <h2 id="oauth-title">Connect <span id="oauth-provider">provider</span></h2>
       <ol class="oauth-steps">
         <li>Open the authorization page and approve access.</li>
-        <li>Copy the code shown after approving.</li>
+        <li>Copy the code it shows — <em>or</em> the full URL from your browser's
+            address bar (a “can't reach this page” screen is expected for x.ai;
+            the code is in the URL).</li>
         <li>Paste it below and connect.</li>
       </ol>
       <a class="btn btn-primary" id="oauth-open" href="#" target="_blank" rel="noopener">Open authorization page ↗</a>
-      <textarea id="oauth-code" placeholder="Paste the code here (looks like xx␣or␣code#state)" rows="3"></textarea>
+      <textarea id="oauth-code" placeholder="Paste the code (code#state) or the full redirect URL" rows="3"></textarea>
       <div class="modal-actions">
         <button class="btn" id="oauth-cancel">Cancel</button>
         <button class="btn btn-primary" id="oauth-submit">Connect</button>

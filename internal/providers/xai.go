@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,11 +12,23 @@ import (
 	"github.com/algonode/aimon/internal/config"
 	"github.com/algonode/aimon/internal/model"
 	"github.com/algonode/aimon/internal/oauth"
+	"github.com/algonode/aimon/internal/store"
 )
 
 // grokBillingURL is the Connect/gRPC-web endpoint the Grok CLI's `/usage`
 // command reads. It works with a Connect-JSON POST and a SuperGrok OAuth bearer.
 const grokBillingURL = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig"
+
+// x.ai's public desktop OAuth client (the same one the Grok CLI / Hermes use —
+// public metadata, not a secret). The flow is loopback-redirect + PKCE; aimon
+// uses the manual paste-the-code variant so it works for remote/headless hosts.
+const (
+	xaiClientID    = "b1a00492-073a-47ea-816f-4c329264a828"
+	xaiAuthorize   = "https://auth.x.ai/oauth2/authorize"
+	xaiTokenURL    = "https://auth.x.ai/oauth2/token"
+	xaiRedirectURI = "http://127.0.0.1:56121/callback"
+	xaiScope       = "openid profile email offline_access grok-cli:access api:access"
+)
 
 // xai monitors x.ai / SuperGrok. SuperGrok usage is exposed through the same
 // billing RPC that the Grok CLI's `/usage` command uses; it needs the
@@ -33,9 +46,10 @@ type xai struct {
 	tokenFile string
 	usageURL  string
 	base      string
+	oauth     *oauth.Manager
 }
 
-func newXAI(m config.Monitor, _ *oauth.Manager) *xai {
+func newXAI(m config.Monitor, mgr *oauth.Manager) *xai {
 	base := m.BaseURL
 	if base == "" {
 		base = "https://api.x.ai/v1"
@@ -51,15 +65,34 @@ func newXAI(m config.Monitor, _ *oauth.Manager) *xai {
 		tokenFile: m.TokenFile,
 		usageURL:  usage,
 		base:      base,
+		oauth:     mgr,
 	}
 }
 
 func (x *xai) ID() string    { return "xai" }
 func (x *xai) Label() string { return x.label }
 func (x *xai) Kind() string  { return model.KindSubscription }
+func (x *xai) Manual() bool  { return true }
+
+// OAuthConfig returns the SuperGrok OAuth (PKCE) configuration so x.ai gets the
+// same in-app Connect flow as Claude.
+func (x *xai) OAuthConfig() oauth.Config {
+	return oauth.Config{
+		Provider:            x.ID(),
+		AuthorizeURL:        xaiAuthorize,
+		TokenURL:            xaiTokenURL,
+		ClientID:            xaiClientID,
+		Scopes:              strings.Fields(xaiScope),
+		RedirectURI:         xaiRedirectURI,
+		FormEncoded:         true,
+		Nonce:               true,
+		ChallengeOnExchange: true,
+		ExtraAuth:           map[string]string{"plan": "generic", "referrer": "hermes-agent"},
+	}
+}
 
 func (x *xai) Fetch(ctx context.Context) (model.Status, error) {
-	// Resolve a SuperGrok bearer token (live file beats static config).
+	// Token priority: live file > static bearer > in-app OAuth token.
 	token := x.bearer
 	if x.tokenFile != "" {
 		t, err := readTokenFile(x.tokenFile)
@@ -67,6 +100,20 @@ func (x *xai) Fetch(ctx context.Context) (model.Status, error) {
 			return model.Status{}, fmt.Errorf("read token_file: %w", err)
 		}
 		token = t
+	}
+	if token == "" && x.oauth != nil {
+		t, err := x.oauth.AccessToken(ctx, x.label, x.OAuthConfig())
+		switch {
+		case err == nil:
+			token = t
+		case errors.Is(err, store.ErrNoToken):
+			// fall through — try api_key or prompt to connect
+		default:
+			// Connected previously but the token can't be refreshed.
+			st := model.Status{Provider: x.ID(), Label: x.label, Kind: x.Kind(), NeedsAuth: true}
+			st.Error = "SuperGrok auth expired — reconnect"
+			return st, fmt.Errorf("xai auth: %w", err)
+		}
 	}
 
 	if token != "" {
@@ -76,7 +123,7 @@ func (x *xai) Fetch(ctx context.Context) (model.Status, error) {
 		return x.fetchAPIKey(ctx)
 	}
 	st := model.Status{Provider: x.ID(), Label: x.label, Kind: x.Kind(), NeedsAuth: true}
-	st.Error = "no credentials — set token_file / bearer_token (SuperGrok) or api_key"
+	st.Error = "not connected — click Connect to authorize SuperGrok"
 	return st, nil
 }
 

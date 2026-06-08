@@ -20,8 +20,8 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 | **DeepSeek** | Prepaid balance (`/user/balance`) | `api_key` | ✅ verified |
 | **OpenRouter** | Credit balance + rate-limit (`/credits`, `/key`) | `api_key` | ✅ verified |
 | **Anthropic API** | Month-to-date spend (Admin **cost report**) | `admin_key` (`sk-ant-admin-…`) | ✅ verified |
-| **Claude Pro/Max** | Subscription connection (usage best-effort) | OAuth (connect in UI) | 🔶 OAuth verified, usage best-effort |
-| **x.ai SuperGrok** | Billing-cycle usage (`GetGrokCreditsConfig`) | SuperGrok token via `token_file`/`bearer_token` | ✅ usage / 🔶 api-key = status only |
+| **Claude Pro/Max** | Subscription connection (usage best-effort) | OAuth — connect in UI | 🔶 OAuth verified, usage best-effort |
+| **x.ai SuperGrok** | Billing-cycle usage (`GetGrokCreditsConfig`) | OAuth — connect in UI (or `token_file`/`bearer_token`) | ✅ |
 
 > **Anthropic** has no public *prepaid balance* API, so aimon reports
 > **month-to-date cost** from the Admin cost report instead (needs an
@@ -32,9 +32,11 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 > public contract — set `usage_url` if your plan exposes one.
 >
 > **x.ai SuperGrok** usage comes from the same `grok.com` billing RPC that the
-> Grok CLI's `/usage` command reads. Point `token_file` at the credential file
-> a SuperGrok OAuth tool keeps refreshed (e.g. `~/.hermes/auth.json` or
-> `~/.grok/auth.json`) and aimon reads the live token each poll.
+> Grok CLI's `/usage` command reads. Easiest: click **Connect** and authorize
+> via x.ai's OAuth (PKCE) — the same public desktop client the Grok CLI/Hermes
+> use; tokens are stored and auto-refreshed. Alternatively point `token_file` at
+> a credential file an external tool keeps refreshed (e.g. `~/.hermes/auth.json`
+> or `~/.grok/auth.json`), or supply a static `bearer_token`.
 
 ---
 
@@ -101,13 +103,16 @@ monitors:
 Per-monitor fields: `provider`, `label`, `enabled`, `api_key`, `admin_key`,
 `oauth`, `bearer_token`, `token_file`, `usage_url`, `base_url`.
 
-### Connecting Claude (manual OAuth)
+### Connecting a subscription (manual OAuth, PKCE)
 
-1. Click **Connect** on the Claude card.
-2. Open the authorization page, approve, and copy the code it shows
-   (looks like `code#state`).
-3. Paste it back and **Connect**. Tokens are stored in SQLite and
-   auto-refreshed.
+Both **Claude** and **x.ai SuperGrok** use an in-app paste-the-code flow:
+
+1. Click **Connect** on the card.
+2. Open the authorization page and approve.
+   - **Claude** shows a `code#state` string — copy it.
+   - **x.ai** redirects to a loopback URL (`127.0.0.1:56121/…`) that won't load;
+     copy the **full URL from your browser's address bar** instead.
+3. Paste it back and **Connect**. Tokens are stored in SQLite and auto-refreshed.
 
 ---
 
