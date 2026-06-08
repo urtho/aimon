@@ -1,0 +1,23 @@
+# Binaries
+/aimon
+/bin/
+*.exe
+
+# Local data (sqlite db lives here; bind-mounted in docker-compose)
+/data/*
+!/data/.gitkeep
+
+# Local config with secrets
+/config.yaml
+.env
+
+# Go
+*.test
+*.out
+vendor/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

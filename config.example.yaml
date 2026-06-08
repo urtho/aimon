@@ -1,0 +1,45 @@
+# aimon — AI subscription / credit monitor configuration.
+#
+# Copy to config.yaml and fill in (or, preferably, leave the ${ENV} refs and
+# set the secrets via environment variables / docker-compose). ${VAR} and $VAR
+# are expanded from the environment at load time.
+
+listen: ":8080"
+database: "./data/aimon.db"
+poll_interval: 60s
+
+# Externally reachable base URL — only needed for OAuth redirect URIs.
+# public_url: "http://localhost:8080"
+
+monitors:
+  # --- Prepaid credit balances (fully supported) ---------------------------
+  - provider: deepseek
+    label: "DeepSeek"
+    api_key: "${DEEPSEEK_API_KEY}"
+
+  - provider: openrouter
+    label: "OpenRouter"
+    api_key: "${OPENROUTER_API_KEY}"
+
+  # --- Anthropic API spend (Admin API, month-to-date cost) -----------------
+  # Requires an Admin API key (sk-ant-admin-...), NOT a normal API key.
+  - provider: anthropic
+    label: "Anthropic API"
+    admin_key: "${ANTHROPIC_ADMIN_KEY}"
+
+  # --- Subscription usage via OAuth (best-effort) --------------------------
+  # Claude Pro/Max: connect once at /  (Connect button) — opens the Anthropic
+  # OAuth consent page, then paste the returned code back in. Tokens are stored
+  # in SQLite and auto-refreshed.
+  - provider: claude
+    label: "Claude (Max)"
+    oauth: true
+
+  # x.ai SuperGrok: no public consumer-usage API exists. With an API key this
+  # reports API-key status; set bearer_token + usage_url to poll a private
+  # grok.com/console usage endpoint if you have one.
+  - provider: xai
+    label: "SuperGrok (hermes)"
+    api_key: "${XAI_API_KEY}"
+    # bearer_token: "${XAI_SESSION_TOKEN}"
+    # usage_url: "https://api.x.ai/v1/..."
