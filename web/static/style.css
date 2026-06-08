@@ -21,6 +21,11 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute must always win, even over explicit `display` rules
+   (e.g. .modal-backdrop sets display:grid). Without this the modal renders on
+   load and can't be dismissed. */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {
