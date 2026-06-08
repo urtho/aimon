@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,6 +39,10 @@ type Config struct {
 	// ChallengeOnExchange re-sends code_challenge/method in the token request
 	// (some servers, e.g. auth.x.ai, expect it alongside code_verifier).
 	ChallengeOnExchange bool
+	// ParamOrder pins the authorize query-param order to match a reference client
+	// byte-for-byte (Anthropic's flow is order-sensitive in practice). Keys not
+	// listed are appended sorted. Empty => fully sorted.
+	ParamOrder []string
 }
 
 // Manager runs OAuth flows and hands out fresh access tokens.
@@ -84,37 +89,69 @@ func (m *Manager) StartFlow(ctx context.Context, label string, cfg Config, redir
 		return "", "", fmt.Errorf("persist pending flow: %w", err)
 	}
 
-	q := url.Values{}
-	q.Set("response_type", "code")
-	q.Set("client_id", cfg.ClientID)
-	q.Set("redirect_uri", redirectURI)
-	if len(cfg.Scopes) > 0 {
-		q.Set("scope", strings.Join(cfg.Scopes, " "))
+	params := map[string]string{
+		"response_type":         "code",
+		"client_id":             cfg.ClientID,
+		"redirect_uri":          redirectURI,
+		"state":                 state,
+		"code_challenge":        challenge,
+		"code_challenge_method": "S256",
 	}
-	q.Set("state", state)
-	q.Set("code_challenge", challenge)
-	q.Set("code_challenge_method", "S256")
+	if len(cfg.Scopes) > 0 {
+		params["scope"] = strings.Join(cfg.Scopes, " ")
+	}
 	if cfg.Nonce {
 		nonce, nerr := randomB64(16)
 		if nerr != nil {
 			return "", "", nerr
 		}
-		q.Set("nonce", nonce)
+		params["nonce"] = nonce
 	}
 	for k, v := range cfg.ExtraAuth {
-		q.Set(k, v)
+		params[k] = v
 	}
 
 	sep := "?"
 	if strings.Contains(cfg.AuthorizeURL, "?") {
 		sep = "&"
 	}
-	// Encode spaces as %20, not '+'. In a URL query '+' is a literal plus (only
-	// form bodies treat it as space), and strict OIDC servers (Anthropic) reject
-	// a scope like "a+b+c" with "Invalid request format". url.Values.Encode only
-	// emits '+' for spaces (a literal '+' becomes %2B), so this swap is safe.
-	query := strings.ReplaceAll(q.Encode(), "+", "%20")
-	return cfg.AuthorizeURL + sep + query, state, nil
+	return cfg.AuthorizeURL + sep + encodeOrdered(params, cfg.ParamOrder), state, nil
+}
+
+// encodeOrdered builds a query string with the keys in `order` first (in that
+// order), then any remaining keys sorted. Spaces are encoded as '+' via
+// url.QueryEscape — matching the reference OAuth clients (claude-code uses '+',
+// not '%20', and is order-sensitive).
+func encodeOrdered(params map[string]string, order []string) string {
+	var b strings.Builder
+	seen := make(map[string]bool, len(params))
+	write := func(k string) {
+		v, ok := params[k]
+		if !ok || seen[k] {
+			return
+		}
+		seen[k] = true
+		if b.Len() > 0 {
+			b.WriteByte('&')
+		}
+		b.WriteString(url.QueryEscape(k))
+		b.WriteByte('=')
+		b.WriteString(url.QueryEscape(v))
+	}
+	for _, k := range order {
+		write(k)
+	}
+	rest := make([]string, 0, len(params))
+	for k := range params {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	for _, k := range rest {
+		write(k)
+	}
+	return b.String()
 }
 
 // Complete exchanges an authorization code for tokens and stores them. The code

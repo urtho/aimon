@@ -77,6 +77,12 @@ func (c *claude) OAuthConfig() oauth.Config {
 		// `code=true` selects Anthropic's manual code-display flow; without it the
 		// authorize page rejects with "Invalid request format".
 		ExtraAuth: map[string]string{"code": "true"},
+		// Emit params in the exact order the Claude Code CLI uses (the authorize
+		// flow is order-sensitive in practice).
+		ParamOrder: []string{
+			"code", "client_id", "response_type", "redirect_uri",
+			"scope", "code_challenge", "code_challenge_method", "state",
+		},
 	}
 }
 
