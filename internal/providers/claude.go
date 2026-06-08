@@ -17,7 +17,7 @@ import (
 // page that prints `code#state` for the user to paste back.
 const (
 	claudeClientID    = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	claudeAuthorize   = "https://claude.ai/oauth/authorize"
+	claudeAuthorize   = "https://claude.com/cai/oauth/authorize"
 	claudeTokenURL    = "https://platform.claude.com/v1/oauth/token"
 	claudeRedirectURI = "https://platform.claude.com/oauth/code/callback"
 	// Best-effort usage endpoint; override per-monitor with `usage_url`.
@@ -60,9 +60,15 @@ func (c *claude) OAuthConfig() oauth.Config {
 		AuthorizeURL: claudeAuthorize,
 		TokenURL:     claudeTokenURL,
 		ClientID:     claudeClientID,
-		Scopes:       []string{"user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers"},
-		RedirectURI:  claudeRedirectURI,
-		FormEncoded:  true, // platform.claude.com token endpoint wants form-encoded
+		// The live Claude Code binary requests this exact 6-scope union (order
+		// preserved). A subset is rejected by the authorize endpoint with
+		// "Invalid request format" even though the consent page renders.
+		Scopes: []string{
+			"org:create_api_key", "user:profile", "user:inference",
+			"user:sessions:claude_code", "user:mcp_servers", "user:file_upload",
+		},
+		RedirectURI: claudeRedirectURI,
+		FormEncoded: false, // token exchange is JSON (Content-Type: application/json)
 		// `code=true` selects Anthropic's manual code-display flow; without it the
 		// authorize page rejects with "Invalid request format".
 		ExtraAuth: map[string]string{"code": "true"},

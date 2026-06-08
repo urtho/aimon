@@ -48,7 +48,9 @@ type Manager struct {
 
 // New constructs a Manager backed by the given store.
 func New(s *store.Store) *Manager {
-	return &Manager{store: s, client: &http.Client{Timeout: 20 * time.Second}}
+	// The token endpoints (notably platform.claude.com) can be slow under load;
+	// give the exchange/refresh generous headroom.
+	return &Manager{store: s, client: &http.Client{Timeout: 60 * time.Second}}
 }
 
 // tokenResponse is the standard OAuth2 token endpoint payload.
