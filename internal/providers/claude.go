@@ -63,6 +63,9 @@ func (c *claude) OAuthConfig() oauth.Config {
 		Scopes:       []string{"org:create_api_key", "user:profile", "user:inference"},
 		RedirectURI:  claudeRedirectURI,
 		FormEncoded:  false,
+		// `code=true` selects Anthropic's manual code-display flow; without it the
+		// authorize page rejects with "Invalid request format".
+		ExtraAuth: map[string]string{"code": "true"},
 	}
 }
 

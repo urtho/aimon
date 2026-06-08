@@ -277,9 +277,11 @@
   const modal = document.getElementById("oauth-modal");
   let oauthCtx = { provider: "", label: "" };
 
+  const PROV_NAMES = { xai: "x.ai SuperGrok", claude: "Claude" };
+
   async function openConnect(provider, label) {
-    oauthCtx = { provider, label };
-    document.getElementById("oauth-provider").textContent = provider;
+    oauthCtx = { provider, label, state: "" };
+    document.getElementById("oauth-provider").textContent = PROV_NAMES[provider] || provider;
     document.getElementById("oauth-msg").textContent = "";
     document.getElementById("oauth-code").value = "";
     const open = document.getElementById("oauth-open");
@@ -288,8 +290,13 @@
     try {
       const res = await fetch(`/oauth/start?provider=${encodeURIComponent(provider)}&label=${encodeURIComponent(label)}`);
       const data = await res.json();
-      if (data.auth_url) open.href = data.auth_url;
-      else setModalMsg(data.error || "could not start OAuth", true);
+      if (data.auth_url) {
+        open.href = data.auth_url;
+        // Remember the state we started with — the pasted code may not carry it.
+        oauthCtx.state = data.state || "";
+      } else {
+        setModalMsg(data.error || "could not start OAuth", true);
+      }
     } catch (e) { setModalMsg("could not start OAuth", true); }
   }
 
