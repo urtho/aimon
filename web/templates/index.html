@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>aimon · AI credit & subscription monitor</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body data-poll="{{.PollInterval}}">
+  <!-- animated aurora backdrop -->
+  <div class="aurora" aria-hidden="true">
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+    <div class="grid-overlay"></div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◈</span>
+      <div class="brand-text">
+        <h1>ai<span>mon</span></h1>
+        <p>AI subscription &amp; credit monitor</p>
+      </div>
+    </div>
+
+    <div class="topstats">
+      <div class="stat">
+        <span class="stat-label">credit remaining</span>
+        <span class="stat-value" id="total-credit">—</span>
+      </div>
+      <div class="livebox" title="Live updates via SSE">
+        <span class="live-dot" id="live-dot"></span>
+        <span id="live-text">connecting…</span>
+      </div>
+      <div class="refresh-ring" id="refresh-ring" title="Next refresh">
+        <svg viewBox="0 0 36 36">
+          <circle class="ring-bg" cx="18" cy="18" r="15.9155" />
+          <circle class="ring-fg" id="ring-fg" cx="18" cy="18" r="15.9155" />
+        </svg>
+        <span class="refresh-count" id="refresh-count">60</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="cards" id="cards" aria-live="polite"></section>
+    <p class="empty" id="empty" hidden>No monitors configured. Edit <code>config.yaml</code> and restart.</p>
+  </main>
+
+  <footer class="foot">
+    <span>aimon</span>
+    <span class="dot-sep">·</span>
+    <span>polling every {{.PollInterval}}s</span>
+    <span class="dot-sep">·</span>
+    <span>{{.Version}}</span>
+  </footer>
+
+  <!-- OAuth connect modal -->
+  <div class="modal-backdrop" id="oauth-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="oauth-title">
+      <button class="modal-close" id="oauth-close" aria-label="Close">×</button>
+      <h2 id="oauth-title">Connect <span id="oauth-provider">provider</span></h2>
+      <ol class="oauth-steps">
+        <li>Open the authorization page and approve access.</li>
+        <li>Copy the code shown after approving.</li>
+        <li>Paste it below and connect.</li>
+      </ol>
+      <a class="btn btn-primary" id="oauth-open" href="#" target="_blank" rel="noopener">Open authorization page ↗</a>
+      <textarea id="oauth-code" placeholder="Paste the code here (looks like xx␣or␣code#state)" rows="3"></textarea>
+      <div class="modal-actions">
+        <button class="btn" id="oauth-cancel">Cancel</button>
+        <button class="btn btn-primary" id="oauth-submit">Connect</button>
+      </div>
+      <p class="modal-msg" id="oauth-msg"></p>
+    </div>
+  </div>
+
+  <!-- card template -->
+  <template id="card-tpl">
+    <article class="card" tabindex="0">
+      <div class="card-glow"></div>
+      <header class="card-head">
+        <span class="prov-icon"></span>
+        <div class="card-title">
+          <h3 class="label"></h3>
+          <span class="kind"></span>
+        </div>
+        <span class="status-dot" title=""></span>
+      </header>
+
+      <div class="gauge-wrap">
+        <svg class="gauge" viewBox="0 0 120 120">
+          <circle class="gauge-track" cx="60" cy="60" r="52" />
+          <circle class="gauge-fill" cx="60" cy="60" r="52" />
+        </svg>
+        <div class="gauge-center">
+          <span class="big-value" data-value>—</span>
+          <span class="big-unit"></span>
+        </div>
+      </div>
+
+      <div class="meta">
+        <span class="meta-line primary"></span>
+        <span class="meta-line secondary"></span>
+      </div>
+
+      <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" hidden>
+        <polyline class="spark-line" points="" />
+        <polyline class="spark-area" points="" />
+      </svg>
+
+      <footer class="card-foot">
+        <span class="updated"></span>
+        <button class="btn btn-connect" hidden>Connect</button>
+      </footer>
+    </article>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
