@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,7 +80,9 @@ func (m *Manager) StartFlow(ctx context.Context, label string, cfg Config, redir
 	if err != nil {
 		return "", "", err
 	}
-	state, err = randomB64(16)
+	// Hex (not base64url) so state contains only [0-9a-f] — no '-'/'_' that some
+	// authorize endpoints dislike — and is comfortably long.
+	state, err = randomHex(24)
 	if err != nil {
 		return "", "", err
 	}
@@ -345,6 +348,15 @@ func randomB64(n int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// randomHex returns n random bytes as a lowercase hex string ([0-9a-f] only).
+func randomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // s256Challenge computes the PKCE S256 challenge for a verifier.
