@@ -122,7 +122,8 @@ body {
 main { padding: 10px clamp(18px, 4vw, 54px) 40px; }
 .cards {
   display: grid; gap: 20px;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  /* 232px = the previous 290px basis minus 20% — slimmer cards, more per row */
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
 }
 .empty { text-align: center; color: var(--txt-dim); margin-top: 80px; }
 .empty code { color: var(--accent); }
@@ -178,7 +179,7 @@ main { padding: 10px clamp(18px, 4vw, 54px) 40px; }
   margin: 26px 0 18px;
 }
 .big-value {
-  font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums;
+  font-size: 38px; font-weight: 800; font-variant-numeric: tabular-nums;
   letter-spacing: -1.5px; line-height: 1;
   background: linear-gradient(135deg, #fff 30%, color-mix(in srgb, var(--c1) 80%, #fff));
   -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -194,8 +195,8 @@ main { padding: 10px clamp(18px, 4vw, 54px) 40px; }
   font-variant-numeric: tabular-nums;
 }
 .span-pct {
-  font-size: 25px; font-weight: 800; letter-spacing: -0.5px; line-height: 1;
-  color: var(--ok); min-width: 64px;
+  font-size: 23px; font-weight: 800; letter-spacing: -0.5px; line-height: 1;
+  color: var(--ok); min-width: 56px;
 }
 .span-pct.mid { color: var(--warn); }
 .span-pct.low { color: var(--err); }
