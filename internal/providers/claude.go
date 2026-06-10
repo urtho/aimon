@@ -42,7 +42,19 @@ type claude struct {
 	oauth    *oauth.Manager
 	usageURL string
 	authURL  string // authorize endpoint (override via config authorize_url)
+
+	// Last good usage snapshot, reused across transient endpoint hiccups so the
+	// card doesn't flap between window rows and a bare "connected" every time a
+	// single poll 429s/times out. Fetch is never called concurrently for the
+	// same monitor (the poller runs one fetch per provider per tick), so plain
+	// fields are fine.
+	lastSpans   []model.Span
+	lastSpansAt time.Time
 }
+
+// staleSpanTTL is how long the last good usage windows keep being shown when
+// the usage endpoint fails transiently.
+const staleSpanTTL = 15 * time.Minute
 
 func newClaude(m config.Monitor, mgr *oauth.Manager) *claude {
 	usage := m.UsageURL
@@ -118,36 +130,64 @@ func (c *claude) Fetch(ctx context.Context) (model.Status, error) {
 	base.Extra = map[string]any{}
 
 	if ferr != nil || code != 200 {
+		// Record the cause so /api/status shows WHY usage is missing.
+		if code != 0 {
+			base.Extra["usage_http"] = code
+		}
+		if ferr != nil {
+			base.Extra["usage_err"] = ferr.Error()
+		}
+		if c.applyLastSpans(&base) {
+			return base, nil // bridge the hiccup with the last good windows
+		}
 		base.Extra["usage"] = "unavailable"
 		base.Extra["hint"] = "set `usage_url` for this monitor if your plan exposes a usage endpoint"
-		if code != 0 {
-			base.Extra["http_status"] = code
-		}
 		return base, nil
 	}
 
 	if spans := parseClaudeUsage(rawAny); len(spans) > 0 {
-		base.Spans = spans
-		// Aggregate fields track the tightest window (drives summary + history).
-		worst := spans[0]
-		for _, sp := range spans {
-			if sp.Used > worst.Used {
-				worst = sp
-			}
-		}
-		base.Used = fptr(worst.Used)
-		base.Total = fptr(100)
-		base.Balance = fptr(100 - worst.Used)
-		if worst.ResetAt > 0 {
-			r := worst.ResetAt
-			base.ResetAt = &r
-		}
+		c.lastSpans, c.lastSpansAt = spans, time.Now()
+		applySpans(&base, spans)
+	} else {
+		// 200 but nothing recognizable in the body.
+		base.Extra["usage"] = "unparsed"
+		c.applyLastSpans(&base)
 	}
 	// Keep a compact copy of the raw response for debugging in the UI.
 	if b, mErr := json.Marshal(rawAny); mErr == nil {
 		base.Extra["raw"] = string(b)
 	}
 	return base, nil
+}
+
+// applySpans fills a Status's Spans plus the aggregate fields, which track the
+// tightest window (drives the summary and DB history).
+func applySpans(st *model.Status, spans []model.Span) {
+	st.Spans = spans
+	worst := spans[0]
+	for _, sp := range spans {
+		if sp.Used > worst.Used {
+			worst = sp
+		}
+	}
+	st.Used = fptr(worst.Used)
+	st.Total = fptr(100)
+	st.Balance = fptr(100 - worst.Used)
+	if worst.ResetAt > 0 {
+		r := worst.ResetAt
+		st.ResetAt = &r
+	}
+}
+
+// applyLastSpans reuses the last good windows when they're still fresh,
+// marking the status as stale. Reports whether it applied anything.
+func (c *claude) applyLastSpans(st *model.Status) bool {
+	if len(c.lastSpans) == 0 || time.Since(c.lastSpansAt) > staleSpanTTL {
+		return false
+	}
+	applySpans(st, c.lastSpans)
+	st.Extra["usage"] = fmt.Sprintf("stale (%ds old)", int(time.Since(c.lastSpansAt).Seconds()))
+	return true
 }
 
 // claudeWindowLabels maps the usage endpoint's window keys to short row labels
