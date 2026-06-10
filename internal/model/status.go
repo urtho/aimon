@@ -32,6 +32,11 @@ type Status struct {
 	Window  string `json:"window,omitempty"`   // human window for cost/usage, e.g. "month-to-date"
 	ResetAt *int64 `json:"reset_at,omitempty"` // unix seconds when a quota window resets
 
+	// Spans lists the individual quota windows of a subscription (e.g. the
+	// 5-hour session window and the 7-day week). The UI renders one row per
+	// span: "92%/5h, resets 4h32m".
+	Spans []Span `json:"spans,omitempty"`
+
 	// NeedsAuth flags that an interactive (OAuth) login is required before this
 	// monitor can report. The UI surfaces a "Connect" affordance for these.
 	NeedsAuth bool `json:"needs_auth,omitempty"`
@@ -40,6 +45,14 @@ type Status struct {
 	Extra map[string]any `json:"extra,omitempty"`
 
 	UpdatedAt int64 `json:"updated_at"` // unix seconds of this snapshot
+}
+
+// Span is one quota window of a subscription. Used is the percentage consumed
+// (0..100); ResetAt is when the window rolls over.
+type Span struct {
+	Name    string  `json:"name"`               // short label, e.g. "5h", "1w"
+	Used    float64 `json:"used"`               // percent used, 0..100
+	ResetAt int64   `json:"reset_at,omitempty"` // unix seconds
 }
 
 // ID is the stable identity of a monitor: provider + label. Used as the map key

@@ -186,6 +186,12 @@ func (x *xai) fetchSuperGrok(ctx context.Context, token string) (model.Status, e
 		},
 	}
 
+	var resetUnix int64
+	if t, err := time.Parse(time.RFC3339, cr.BillingCycle.BillingPeriodEnd); err == nil {
+		resetUnix = t.Unix()
+		st.ResetAt = &resetUnix
+	}
+
 	if limit > 0 {
 		// Values are integer credits/cents; the ratio is unit-independent.
 		pct := used / limit * 100
@@ -195,14 +201,10 @@ func (x *xai) fetchSuperGrok(ctx context.Context, token string) (model.Status, e
 		st.Balance = fptr(100 - pct)
 		st.Extra["monthly_limit"] = limit
 		st.Extra["total_used"] = used
+		st.Spans = []model.Span{{Name: "1mo", Used: pct, ResetAt: resetUnix}}
 	} else {
 		// No limit reported (e.g. unlimited tier): show raw usage instead.
 		st.Used = fptr(used)
-	}
-
-	if t, err := time.Parse(time.RFC3339, cr.BillingCycle.BillingPeriodEnd); err == nil {
-		u := t.Unix()
-		st.ResetAt = &u
 	}
 	return st, nil
 }

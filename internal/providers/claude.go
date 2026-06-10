@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -125,15 +126,21 @@ func (c *claude) Fetch(ctx context.Context) (model.Status, error) {
 		return base, nil
 	}
 
-	if util, reset, windows, ok := parseClaudeUsage(rawAny); ok {
-		base.Used = fptr(util * 100)
-		base.Total = fptr(100)
-		base.Balance = fptr((1 - util) * 100)
-		if reset > 0 {
-			base.ResetAt = &reset
+	if spans := parseClaudeUsage(rawAny); len(spans) > 0 {
+		base.Spans = spans
+		// Aggregate fields track the tightest window (drives summary + history).
+		worst := spans[0]
+		for _, sp := range spans {
+			if sp.Used > worst.Used {
+				worst = sp
+			}
 		}
-		if len(windows) > 0 {
-			base.Extra["windows"] = windows // per-window utilization %, for debugging
+		base.Used = fptr(worst.Used)
+		base.Total = fptr(100)
+		base.Balance = fptr(100 - worst.Used)
+		if worst.ResetAt > 0 {
+			r := worst.ResetAt
+			base.ResetAt = &r
 		}
 	}
 	// Keep a compact copy of the raw response for debugging in the UI.
@@ -143,42 +150,49 @@ func (c *claude) Fetch(ctx context.Context) (model.Status, error) {
 	return base, nil
 }
 
-// parseClaudeUsage extracts rate-limit utilization from the OAuth usage
+// claudeWindowLabels maps the usage endpoint's window keys to short row labels
+// and a display order (shortest window first).
+var claudeWindowLabels = map[string]struct {
+	label string
+	order int
+}{
+	"five_hour":            {"5h", 0},
+	"seven_day":            {"1w", 1},
+	"seven_day_opus":       {"1w opus", 2},
+	"seven_day_sonnet":     {"1w sonnet", 3},
+	"seven_day_oauth_apps": {"1w apps", 4},
+}
+
+// parseClaudeUsage extracts the per-window quota spans from the OAuth usage
 // endpoint. The response holds one object per limit window (five_hour,
 // seven_day, seven_day_opus, ...), each with a `utilization` PERCENTAGE plus
-// `resets_at`. The gauge shows the most-utilized window; windows maps each
-// window name to its raw percentage.
+// `resets_at`.
 //
 // utilization is always a percent (0-100). Do NOT re-scale values ≤ 1: a
 // freshly reset window reporting e.g. 0.8 means 0.8%, and interpreting it as a
 // 0..1 fraction made the gauge spike to ~100% whenever any window dipped
 // below 1% — the "alternating 100% used" bug.
-func parseClaudeUsage(m map[string]any) (frac float64, resetAt int64, windows map[string]any, ok bool) {
-	windows = map[string]any{}
-	best := -1.0
-	var bestReset int64
+func parseClaudeUsage(m map[string]any) []model.Span {
+	type entry struct {
+		span  model.Span
+		order int
+	}
+	var entries []entry
 
 	var scan func(name string, v any)
 	scan = func(name string, v any) {
 		switch t := v.(type) {
 		case map[string]any:
 			if u, uok := toFloat(t["utilization"]); uok {
-				if name != "" {
-					windows[name] = u
+				label, order := name, 100 // unknown windows: raw key, listed last
+				if def, known := claudeWindowLabels[name]; known {
+					label, order = def.label, def.order
 				}
-				f := u / 100
-				if f < 0 {
-					f = 0
-				} else if f > 1 {
-					f = 1
+				sp := model.Span{Name: label, Used: clampPct(u)}
+				if r, rok := toUnix(t["resets_at"]); rok {
+					sp.ResetAt = r
 				}
-				if f > best {
-					best = f
-					bestReset = 0
-					if r, rok := toUnix(t["resets_at"]); rok {
-						bestReset = r
-					}
-				}
+				entries = append(entries, entry{sp, order})
 				return
 			}
 			for k, child := range t {
@@ -196,10 +210,27 @@ func parseClaudeUsage(m map[string]any) (frac float64, resetAt int64, windows ma
 	}
 	scan("", m)
 
-	if best < 0 {
-		return 0, 0, windows, false
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].order != entries[j].order {
+			return entries[i].order < entries[j].order
+		}
+		return entries[i].span.Name < entries[j].span.Name
+	})
+	spans := make([]model.Span, len(entries))
+	for i, e := range entries {
+		spans[i] = e.span
 	}
-	return best, bestReset, windows, true
+	return spans
+}
+
+func clampPct(f float64) float64 {
+	if f < 0 {
+		return 0
+	}
+	if f > 100 {
+		return 100
+	}
+	return f
 }
 
 func toFloat(v any) (float64, bool) {

@@ -93,26 +93,17 @@
         <span class="status-dot" title=""></span>
       </header>
 
-      <div class="gauge-wrap">
-        <svg class="gauge" viewBox="0 0 120 120">
-          <circle class="gauge-track" cx="60" cy="60" r="52" />
-          <circle class="gauge-fill" cx="60" cy="60" r="52" />
-        </svg>
-        <div class="gauge-center">
-          <span class="big-value" data-value>—</span>
-          <span class="big-unit"></span>
-        </div>
+      <div class="value-wrap">
+        <span class="big-value" data-value>—</span>
+        <span class="big-unit"></span>
       </div>
+
+      <div class="spans" hidden></div>
 
       <div class="meta">
         <span class="meta-line primary"></span>
         <span class="meta-line secondary"></span>
       </div>
-
-      <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" hidden>
-        <polyline class="spark-line" points="" />
-        <polyline class="spark-area" points="" />
-      </svg>
 
       <footer class="card-foot">
         <span class="updated"></span>

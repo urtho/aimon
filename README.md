@@ -5,8 +5,9 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 
 - 🔄 Polls every provider on an interval (default **60s**) and writes each
   snapshot to **SQLite** — so you get history, not just a current number.
-- ⚡ **Live UI** over Server-Sent Events: animated circular gauges, count-up
-  numbers, 24-hour sparklines, an aurora backdrop, and a refresh countdown.
+- ⚡ **Live UI** over Server-Sent Events: plain numbers — USD credits left or
+  % quota left, one row per quota window (`92%/5h, resets 4h32m`) — with
+  count-up animations, an aurora backdrop, and a refresh countdown.
 - 🔐 Manual **OAuth (PKCE)** connect flow for subscription providers.
 - 🐳 Ships as a **~14 MB `scratch` image** — fully static, rootless (uid 65532),
   read-only rootfs, TLS-capable.

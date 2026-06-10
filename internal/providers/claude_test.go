@@ -17,7 +17,7 @@ func mustParse(t *testing.T, payload string) map[string]any {
 }
 
 // Regression: a freshly reset window reporting sub-1% utilization (0.8 == 0.8%)
-// must not be read as a 0..1 fraction — that made the gauge alternate between
+// must not be read as a 0..1 fraction — that made the card alternate between
 // real values and ~100% used.
 func TestParseClaudeUsageSubPercentWindow(t *testing.T) {
 	m := mustParse(t, `{
@@ -26,45 +26,42 @@ func TestParseClaudeUsageSubPercentWindow(t *testing.T) {
 		"seven_day_opus": {"utilization": null, "resets_at": null}
 	}`)
 
-	frac, reset, windows, ok := parseClaudeUsage(m)
-	if !ok {
-		t.Fatal("expected ok")
+	spans := parseClaudeUsage(m)
+	if len(spans) != 2 {
+		t.Fatalf("got %d spans, want 2 (null-utilization window skipped): %+v", len(spans), spans)
 	}
-	if math.Abs(frac-0.325) > 1e-9 {
-		t.Fatalf("frac = %v, want 0.325 (seven_day wins; 0.8 means 0.8%%, not 80%%)", frac)
+	if spans[0].Name != "5h" || math.Abs(spans[0].Used-0.8) > 1e-9 {
+		t.Fatalf("spans[0] = %+v, want 5h at 0.8%% (0.8 means 0.8%%, not 80%%)", spans[0])
 	}
-	want, _ := time.Parse(time.RFC3339, "2026-06-12T00:00:00Z")
-	if reset != want.Unix() {
-		t.Fatalf("reset = %d, want %d (the winning window's resets_at)", reset, want.Unix())
+	if spans[1].Name != "1w" || math.Abs(spans[1].Used-32.5) > 1e-9 {
+		t.Fatalf("spans[1] = %+v, want 1w at 32.5%%", spans[1])
 	}
-	if got := windows["five_hour"]; got != 0.8 {
-		t.Fatalf("windows[five_hour] = %v, want 0.8", got)
-	}
-	if got := windows["seven_day"]; got != 32.5 {
-		t.Fatalf("windows[seven_day] = %v, want 32.5", got)
+	wantReset, _ := time.Parse(time.RFC3339, "2026-06-12T00:00:00Z")
+	if spans[1].ResetAt != wantReset.Unix() {
+		t.Fatalf("spans[1].ResetAt = %d, want %d", spans[1].ResetAt, wantReset.Unix())
 	}
 }
 
 func TestParseClaudeUsageClampsOver100(t *testing.T) {
 	m := mustParse(t, `{"five_hour": {"utilization": 104.2}}`)
-	frac, _, _, ok := parseClaudeUsage(m)
-	if !ok || frac != 1 {
-		t.Fatalf("frac = %v ok = %v, want clamped 1", frac, ok)
+	spans := parseClaudeUsage(m)
+	if len(spans) != 1 || spans[0].Used != 100 {
+		t.Fatalf("spans = %+v, want one span clamped to 100", spans)
 	}
 }
 
 func TestParseClaudeUsageNothingRecognizable(t *testing.T) {
 	m := mustParse(t, `{"account": {"email": "x@y.z"}}`)
-	if _, _, _, ok := parseClaudeUsage(m); ok {
-		t.Fatal("expected ok=false for a payload without utilization")
+	if spans := parseClaudeUsage(m); len(spans) != 0 {
+		t.Fatalf("spans = %+v, want none for a payload without utilization", spans)
 	}
 }
 
 func TestParseClaudeUsageNestedAndString(t *testing.T) {
 	// Defensive: windows nested under a list, utilization as a string.
 	m := mustParse(t, `{"limits": [{"utilization": "12.5", "resets_at": "2026-06-09T00:00:00Z"}]}`)
-	frac, _, _, ok := parseClaudeUsage(m)
-	if !ok || math.Abs(frac-0.125) > 1e-9 {
-		t.Fatalf("frac = %v ok = %v, want 0.125", frac, ok)
+	spans := parseClaudeUsage(m)
+	if len(spans) != 1 || math.Abs(spans[0].Used-12.5) > 1e-9 {
+		t.Fatalf("spans = %+v, want one span at 12.5%%", spans)
 	}
 }

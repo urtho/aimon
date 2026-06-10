@@ -1,8 +1,6 @@
-/* aimon dashboard — live cards, gauges, sparklines, SSE, OAuth modal */
+/* aimon dashboard — plain-number cards, span rows, SSE, OAuth modal */
 (() => {
   "use strict";
-
-  const GAUGE_CIRC = 2 * Math.PI * 52; // r=52 in the 120x120 viewBox
 
   // Per-provider visual identity.
   const PROVIDERS = {
@@ -18,7 +16,7 @@
   const emptyEl = document.getElementById("empty");
   const tpl = document.getElementById("card-tpl");
 
-  const cards = new Map(); // id -> { root, refs, value }
+  const cards = new Map(); // id -> { root, refs, value, updatedAt, spans }
   let lastRefresh = Date.now();
 
   // ---------- formatting ----------
@@ -28,7 +26,6 @@
     if (sym) return sym + Number(v).toLocaleString();
     return Number(v).toLocaleString() + (unit ? " " + unit : "");
   };
-  const fmtNum = (n) => (Math.round(n * 10) / 10).toLocaleString();
 
   const relTime = (sec) => {
     if (!sec) return "—";
@@ -40,16 +37,16 @@
     return Math.floor(d / 86400) + "d ago";
   };
 
-  const absTime = (sec) =>
-    new Date(sec * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-  // Mirror of model.Status.Remaining(): fraction of credit/quota left, or null.
-  function remainingFraction(s) {
-    if (s.balance != null && s.total != null && s.total > 0) return clamp01(s.balance / s.total);
-    if (s.used != null && s.total != null && s.total > 0) return clamp01(1 - s.used / s.total);
-    return null;
-  }
-  const clamp01 = (f) => Math.min(1, Math.max(0, f));
+  // Compact duration until a reset: 4d2h, 4h32m, 32m.
+  const fmtDur = (sec) => {
+    if (sec <= 0) return "now";
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return d + "d" + (h > 0 ? h + "h" : "");
+    if (h > 0) return h + "h" + (m > 0 ? String(m).padStart(2, "0") + "m" : "");
+    return Math.max(1, m) + "m";
+  };
 
   // ---------- count-up animation ----------
   function countUp(node, from, to, fmt) {
@@ -73,18 +70,16 @@
       label: root.querySelector(".label"),
       kind: root.querySelector(".kind"),
       dot: root.querySelector(".status-dot"),
-      gaugeWrap: root.querySelector(".gauge-wrap"),
-      fill: root.querySelector(".gauge-fill"),
+      valueWrap: root.querySelector(".value-wrap"),
       bigVal: root.querySelector(".big-value"),
       bigUnit: root.querySelector(".big-unit"),
+      spans: root.querySelector(".spans"),
       metaPrimary: root.querySelector(".meta-line.primary"),
       metaSecondary: root.querySelector(".meta-line.secondary"),
-      spark: root.querySelector(".spark"),
-      sparkLine: root.querySelector(".spark-line"),
       updated: root.querySelector(".updated"),
       connect: root.querySelector(".btn-connect"),
     };
-    cards.set(id, { root, refs, value: NaN, updatedAt: 0 });
+    cards.set(id, { root, refs, value: NaN, updatedAt: 0, spans: null });
     cardsEl.appendChild(root);
     return cards.get(id);
   }
@@ -104,7 +99,6 @@
       if (!c) {
         c = makeCard(id);
         c.root.style.animationDelay = i * 70 + "ms";
-        fetchHistory(s, c);
       }
       paint(c, s);
     });
@@ -113,6 +107,36 @@
     for (const [id, c] of cards) {
       if (!seen.has(id)) { c.root.remove(); cards.delete(id); }
     }
+  }
+
+  // One row per quota span: "92%  /5h        resets 4h32m"
+  function renderSpans(r, spans) {
+    if (!spans || !spans.length) {
+      r.spans.hidden = true;
+      r.spans.replaceChildren();
+      return;
+    }
+    r.spans.hidden = false;
+    r.spans.replaceChildren(...spans.map((sp) => {
+      const left = Math.max(0, Math.round(100 - sp.used));
+      const row = document.createElement("div");
+      row.className = "span-row";
+
+      const pct = document.createElement("span");
+      pct.className = "span-pct" + (left <= 10 ? " low" : left <= 25 ? " mid" : "");
+      pct.textContent = left + "%";
+
+      const name = document.createElement("span");
+      name.className = "span-name";
+      name.textContent = "/" + sp.name;
+
+      const reset = document.createElement("span");
+      reset.className = "span-reset";
+      reset.textContent = sp.reset_at ? "resets " + fmtDur(sp.reset_at - Date.now() / 1000) : "";
+
+      row.append(pct, name, reset);
+      return row;
+    }));
   }
 
   function paint(c, s) {
@@ -124,6 +148,7 @@
     r.label.textContent = s.label;
     r.kind.textContent = s.kind;
     c.updatedAt = s.updated_at;
+    c.spans = null;
 
     // status state
     let state = "ok";
@@ -138,87 +163,84 @@
     r.connect.hidden = !s.needs_auth;
     if (s.needs_auth) r.connect.onclick = () => openConnect(s.provider, s.label);
 
-    // --- error / needs-auth presentation ---
+    r.updated.textContent = s.updated_at
+      ? (s.ok ? "updated " : "checked ") + relTime(s.updated_at)
+      : "";
+
+    // --- error / needs-auth ---
     if (!s.ok) {
-      r.gaugeWrap.classList.add("no-gauge");
-      setGauge(r.fill, null);
+      r.valueWrap.hidden = false;
+      renderSpans(r, null);
       r.bigVal.textContent = s.needs_auth ? "—" : "!";
       r.bigUnit.textContent = "";
       r.metaPrimary.textContent = s.needs_auth ? "Not connected" : "Error";
       r.metaSecondary.textContent = s.error || "";
-      r.updated.textContent = s.updated_at ? "checked " + relTime(s.updated_at) : "";
+      c.value = NaN;
       return;
     }
 
-    // --- value + gauge ---
-    const frac = remainingFraction(s);
-    r.gaugeWrap.classList.toggle("no-gauge", frac == null);
-    setGauge(r.fill, frac);
+    if (s.kind === "subscription") {
+      if (s.spans && s.spans.length) {
+        // One row per quota window; no big number.
+        r.valueWrap.hidden = true;
+        c.spans = s.spans;
+        renderSpans(r, s.spans);
+        r.metaPrimary.textContent = s.plan || "";
+        r.metaSecondary.textContent = "";
+      } else {
+        r.valueWrap.hidden = false;
+        renderSpans(r, null);
+        if (s.balance != null) {
+          r.bigVal.textContent = Math.round(s.balance) + "%";
+          r.bigUnit.textContent = "quota left";
+        } else {
+          r.bigVal.textContent = "✓";
+          r.bigUnit.textContent = "connected";
+        }
+        r.metaPrimary.textContent = s.plan || "";
+        r.metaSecondary.textContent = s.extra && s.extra.usage === "unavailable" ? "usage n/a" : "";
+      }
+      c.value = NaN;
+      return;
+    }
 
-    let big, unit, fmt;
-    if (s.kind === "subscription" && s.unit === "%") {
-      big = s.balance != null ? s.balance : 100 - (s.used || 0);
-      unit = "% left"; fmt = (n) => Math.round(n);
-    } else if (s.kind === "cost") {
-      big = s.used || 0; unit = ""; fmt = (n) => fmtMoney(n, s.unit);
-    } else {
+    // --- credit / cost: one big number ---
+    r.valueWrap.hidden = false;
+    renderSpans(r, null);
+
+    let big, unit;
+    if (s.kind === "cost") {
+      big = s.used || 0;
+      unit = "spent";
+    } else { // credit
       big = s.balance != null ? s.balance : (s.used || 0);
-      unit = ""; fmt = (n) => fmtMoney(n, s.unit);
+      unit = "left";
     }
     r.bigUnit.textContent = unit;
+    const fmt = (n) => fmtMoney(n, s.unit);
     countUp(r.bigVal, c.value, big, fmt);
     if (isFinite(c.value) && Math.abs(c.value - big) > 1e-9) {
       r.bigVal.classList.remove("flash"); void r.bigVal.offsetWidth; r.bigVal.classList.add("flash");
     }
     c.value = big;
 
-    // --- meta lines ---
     let p = "", sec = "";
     if (s.kind === "credit") {
-      if (s.total != null) { p = "of " + fmtMoney(s.total, s.unit); if (s.used != null) sec = "used " + fmtMoney(s.used, s.unit); }
-      else { p = "available balance"; }
-    } else if (s.kind === "cost") {
-      p = s.window || "spend"; sec = s.extra && s.extra.since ? "since " + s.extra.since : "";
-    } else if (s.kind === "subscription") {
-      p = s.plan || "subscription";
-      if (s.used != null && s.unit === "%") p = (s.plan ? s.plan + " · " : "") + Math.round(s.used) + "% used";
-      if (s.reset_at) sec = "resets " + absTime(s.reset_at);
+      if (s.total != null) {
+        p = "of " + fmtMoney(s.total, s.unit);
+        if (s.used != null) sec = "used " + fmtMoney(s.used, s.unit);
+      } else {
+        p = "available balance";
+      }
+    } else {
+      p = s.window || "spend";
+      sec = s.extra && s.extra.since ? "since " + s.extra.since : "";
     }
     r.metaPrimary.textContent = p;
     r.metaSecondary.textContent = sec;
-    r.updated.textContent = "updated " + relTime(s.updated_at);
   }
 
-  function setGauge(fillEl, frac) {
-    if (frac == null) { fillEl.style.strokeDashoffset = GAUGE_CIRC * 0.85; return; }
-    fillEl.style.strokeDashoffset = GAUGE_CIRC * (1 - frac);
-  }
-
-  // ---------- sparkline ----------
-  async function fetchHistory(s, c) {
-    try {
-      const url = `/api/history?provider=${encodeURIComponent(s.provider)}&label=${encodeURIComponent(s.label)}&hours=24`;
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const { points } = await res.json();
-      drawSpark(c.refs, points);
-    } catch (_) { /* sparkline is optional */ }
-  }
-
-  function drawSpark(r, points) {
-    if (!points || points.length < 2) { r.spark.hidden = true; return; }
-    const xs = points.map((p) => p.t), ys = points.map((p) => p.v);
-    const minX = Math.min(...xs), maxX = Math.max(...xs);
-    const minY = Math.min(...ys), maxY = Math.max(...ys);
-    const rx = maxX - minX || 1, ry = maxY - minY || 1;
-    const pts = points
-      .map((p) => `${(((p.t - minX) / rx) * 100).toFixed(2)},${(26 - ((p.v - minY) / ry) * 24).toFixed(2)}`)
-      .join(" ");
-    r.sparkLine.setAttribute("points", pts);
-    r.spark.hidden = false;
-  }
-
-  // ---------- summary + countdown ----------
+  // ---------- summary + tickers ----------
   function updateSummary(list) {
     let total = 0, has = false;
     for (const s of list || []) {
@@ -236,10 +258,14 @@
     ringFg.style.strokeDashoffset = -(100 - (remain / pollInterval) * 100);
   }
 
+  // Refresh relative texts (updated x ago, resets in y) once a second.
   function tickRelative() {
     for (const c of cards.values()) {
-      const u = c.refs.updated;
-      if (u && u.textContent.startsWith("updated") && c.updatedAt) u.textContent = "updated " + relTime(c.updatedAt);
+      if (c.updatedAt) {
+        const prefix = c.refs.updated.textContent.startsWith("checked") ? "checked " : "updated ";
+        c.refs.updated.textContent = prefix + relTime(c.updatedAt);
+      }
+      if (c.spans) renderSpans(c.refs, c.spans);
     }
   }
 
@@ -275,7 +301,7 @@
 
   // ---------- OAuth modal ----------
   const modal = document.getElementById("oauth-modal");
-  let oauthCtx = { provider: "", label: "" };
+  let oauthCtx = { provider: "", label: "", state: "" };
 
   const PROV_NAMES = { xai: "x.ai SuperGrok", claude: "Claude" };
 
