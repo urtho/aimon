@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/algonode/aimon/internal/config"
@@ -124,12 +125,15 @@ func (c *claude) Fetch(ctx context.Context) (model.Status, error) {
 		return base, nil
 	}
 
-	if util, reset, ok := parseClaudeUsage(rawAny); ok {
+	if util, reset, windows, ok := parseClaudeUsage(rawAny); ok {
 		base.Used = fptr(util * 100)
 		base.Total = fptr(100)
 		base.Balance = fptr((1 - util) * 100)
 		if reset > 0 {
 			base.ResetAt = &reset
+		}
+		if len(windows) > 0 {
+			base.Extra["windows"] = windows // per-window utilization %, for debugging
 		}
 	}
 	// Keep a compact copy of the raw response for debugging in the UI.
@@ -139,54 +143,72 @@ func (c *claude) Fetch(ctx context.Context) (model.Status, error) {
 	return base, nil
 }
 
-// parseClaudeUsage hunts for a utilization fraction (0..1) and reset time in an
-// unknown-shaped usage payload. Returns ok=false when nothing recognizable is
-// found.
-func parseClaudeUsage(m map[string]any) (util float64, resetAt int64, ok bool) {
-	// Prefer the tightest (most-utilized) window if several are present.
+// parseClaudeUsage extracts rate-limit utilization from the OAuth usage
+// endpoint. The response holds one object per limit window (five_hour,
+// seven_day, seven_day_opus, ...), each with a `utilization` PERCENTAGE plus
+// `resets_at`. The gauge shows the most-utilized window; windows maps each
+// window name to its raw percentage.
+//
+// utilization is always a percent (0-100). Do NOT re-scale values ≤ 1: a
+// freshly reset window reporting e.g. 0.8 means 0.8%, and interpreting it as a
+// 0..1 fraction made the gauge spike to ~100% whenever any window dipped
+// below 1% — the "alternating 100% used" bug.
+func parseClaudeUsage(m map[string]any) (frac float64, resetAt int64, windows map[string]any, ok bool) {
+	windows = map[string]any{}
 	best := -1.0
-	walk(m, func(key string, val any) {
-		switch key {
-		case "utilization", "used_pct", "usage_pct", "percent_used":
-			if f, fok := toFloat(val); fok {
-				if f > 1 { // expressed as a percentage
-					f /= 100
+	var bestReset int64
+
+	var scan func(name string, v any)
+	scan = func(name string, v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			if u, uok := toFloat(t["utilization"]); uok {
+				if name != "" {
+					windows[name] = u
+				}
+				f := u / 100
+				if f < 0 {
+					f = 0
+				} else if f > 1 {
+					f = 1
 				}
 				if f > best {
 					best = f
+					bestReset = 0
+					if r, rok := toUnix(t["resets_at"]); rok {
+						bestReset = r
+					}
 				}
+				return
 			}
-		case "resets_at", "reset_at", "resets":
-			if t, tok := toUnix(val); tok && resetAt == 0 {
-				resetAt = t
+			for k, child := range t {
+				childName := k
+				if name != "" {
+					childName = name + "." + k
+				}
+				scan(childName, child)
+			}
+		case []any:
+			for i, child := range t {
+				scan(fmt.Sprintf("%s[%d]", name, i), child)
 			}
 		}
-	})
-	if best < 0 {
-		return 0, resetAt, false
 	}
-	return best, resetAt, true
-}
+	scan("", m)
 
-// walk visits every key/value pair in a nested map/array structure.
-func walk(v any, fn func(key string, val any)) {
-	switch t := v.(type) {
-	case map[string]any:
-		for k, val := range t {
-			fn(k, val)
-			walk(val, fn)
-		}
-	case []any:
-		for _, val := range t {
-			walk(val, fn)
-		}
+	if best < 0 {
+		return 0, 0, windows, false
 	}
+	return best, bestReset, windows, true
 }
 
 func toFloat(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
 		return n, true
+	case string:
+		f, err := strconv.ParseFloat(n, 64)
+		return f, err == nil
 	case json.Number:
 		f, err := n.Float64()
 		return f, err == nil
