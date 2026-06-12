@@ -29,8 +29,12 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 > so by default aimon reports **month-to-date cost** from the Admin cost report
 > (needs an **Admin** key, not a regular API key). To mirror the Console's
 > "credits left", set `credit_balance` + `credit_as_of` on the monitor — aimon
-> then shows `balance − exact spend since that date` (accurate until your next
-> top-up, at which point you bump the baseline).
+> then shows `balance − exact spend since then` (accurate until your next
+> top-up, at which point you bump the baseline). Use a **full timestamp** for
+> `credit_as_of` (e.g. `2026-06-12T16:00:00+02:00`): the cost report only has
+> daily UTC buckets, and a bare date subtracts the whole day's spend — including
+> spend from before you read the balance — pushing the value negative. With a
+> timestamp, counting starts at the next UTC midnight.
 >
 > **Claude** uses the same OAuth client as Claude Code; the token exchange and
 > refresh are solid, but the subscription *usage* endpoint is not a stable

@@ -25,13 +25,18 @@ monitors:
   # Requires an Admin API key (sk-ant-admin-...), NOT a normal API key.
   # Default: shows month-to-date spend (Anthropic has no public balance API).
   # To show "credits left" like the Console: set credit_balance to the balance
-  # you saw and credit_as_of to that date — aimon reports remaining =
+  # you saw and credit_as_of to WHEN you saw it — aimon reports remaining =
   # credit_balance − spend since then. Bump it whenever you buy more credits.
+  #
+  # IMPORTANT: use a full timestamp, not just a date. The cost report only has
+  # daily UTC buckets, so with a bare date the whole day's spend is subtracted —
+  # including spend made BEFORE you read the balance, driving the value
+  # negative. With a timestamp, counting starts at the next UTC midnight.
   - provider: anthropic
     label: "Anthropic API"
     admin_key: "${ANTHROPIC_ADMIN_KEY}"
     # credit_balance: 19.70
-    # credit_as_of: "2026-06-08"
+    # credit_as_of: "2026-06-12T16:00:00+02:00"
 
   # --- Subscription usage via OAuth (best-effort) --------------------------
   # Claude Pro/Max: connect once at /  (Connect button) — opens the Anthropic

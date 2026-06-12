@@ -59,6 +59,20 @@ func parseAsOf(s string) time.Time {
 	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
+// spendStart converts the credit baseline's as-of moment into the first UTC
+// day whose spend should be subtracted. The cost report only has daily (UTC)
+// buckets, so a baseline read mid-day must NOT include its own day: spend made
+// earlier that day is already reflected in the console balance, and counting
+// the full day again double-subtracts it (the "negative credits" bug). A
+// date-only as_of (midnight) keeps the day inclusive.
+func (a *anthropic) spendStart() time.Time {
+	day := time.Date(a.asOf.Year(), a.asOf.Month(), a.asOf.Day(), 0, 0, 0, 0, time.UTC)
+	if a.asOf.After(day) {
+		return day.AddDate(0, 0, 1) // mid-day baseline: start with the next full day
+	}
+	return day
+}
+
 func (a *anthropic) ID() string    { return "anthropic" }
 func (a *anthropic) Label() string { return a.label }
 func (a *anthropic) Kind() string {
@@ -105,12 +119,17 @@ func (a *anthropic) Fetch(ctx context.Context) (model.Status, error) {
 	now := time.Now().UTC()
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC) // cost mode: MTD
 	if a.hasCredit {
-		start = a.asOf
+		start = a.spendStart()
 	}
 
-	spend, currency, err := a.spendSince(ctx, start, now)
-	if err != nil {
-		return model.Status{}, err
+	var spend float64
+	currency := "USD"
+	if now.After(start) {
+		var err error
+		spend, currency, err = a.spendSince(ctx, start, now)
+		if err != nil {
+			return model.Status{}, err
+		}
 	}
 
 	st := model.Status{
@@ -131,6 +150,13 @@ func (a *anthropic) Fetch(ctx context.Context) (model.Status, error) {
 		st.Window = "since " + start.Format("Jan 2")
 		st.Extra["baseline"] = a.balance
 		st.Extra["note"] = "balance = configured baseline − spend (no public balance API)"
+		if remaining < 0 {
+			// Prepaid credit can't really go below zero — a negative reading means
+			// the baseline no longer matches reality (topped up, or set with a date
+			// that double-counted same-day spend). Surface that.
+			st.Extra["note"] = "negative balance: re-baseline credit_balance/credit_as_of " +
+				"(use the current Console value with a full timestamp)"
+		}
 	} else {
 		st.Used = fptr(spend)
 		st.Window = "month-to-date"
@@ -149,7 +175,7 @@ func (a *anthropic) spendSince(ctx context.Context, start, now time.Time) (float
 	currency := "USD"
 	page := ""
 
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		q := url.Values{}
 		q.Set("starting_at", start.Format(time.RFC3339))
 		q.Set("ending_at", now.Format(time.RFC3339))
