@@ -1,9 +1,33 @@
 package providers
 
 import (
+	"encoding/json"
+	"math"
 	"testing"
 	"time"
 )
+
+// The Cost API returns amounts in cents as decimal strings; spend must be
+// divided by 100 to get USD. Treating "256.30" cents as $256.30 (instead of
+// $2.5630) is what made the credit balance wildly negative.
+func TestSumReportCents(t *testing.T) {
+	const body = `{"data":[
+		{"results":[{"currency":"USD","amount":"200.00"},{"currency":"USD","amount":"56.30"}]},
+		{"results":[{"currency":"USD","amount":"0.50"}]}
+	]}`
+	var rep costReport
+	if err := json.Unmarshal([]byte(body), &rep); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	cur := "USD"
+	cents := sumReportCents(rep, &cur)
+	if math.Abs(cents-256.80) > 1e-9 {
+		t.Fatalf("cents = %v, want 256.80", cents)
+	}
+	if usd := cents / 100; math.Abs(usd-2.568) > 1e-9 {
+		t.Fatalf("usd = %v, want 2.568 (cents/100)", usd)
+	}
+}
 
 // The cost report only has daily UTC buckets. A baseline read mid-day must not
 // re-count its own day's earlier spend (that's already in the console balance)

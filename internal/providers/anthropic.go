@@ -195,18 +195,27 @@ func (a *anthropic) spendSince(ctx context.Context, start, now time.Time) (float
 		if code != 200 {
 			return 0, currency, fmt.Errorf("anthropic %d: %s", code, snippet(raw, 160))
 		}
-		for _, bucket := range rep.Data {
-			for _, r := range bucket.Results {
-				total += float64(r.Amount)
-				if r.Currency != "" {
-					currency = r.Currency
-				}
-			}
-		}
+		total += sumReportCents(rep, &currency)
 		if !rep.HasMore || rep.NextPage == "" {
 			break
 		}
 		page = rep.NextPage
 	}
-	return total, currency, nil
+	// The Cost API reports amounts in USD lowest units (cents) — convert to USD.
+	return total / 100, currency, nil
+}
+
+// sumReportCents totals one cost-report page's amounts (in cents) and tracks the
+// reported currency.
+func sumReportCents(rep costReport, currency *string) float64 {
+	var cents float64
+	for _, bucket := range rep.Data {
+		for _, r := range bucket.Results {
+			cents += float64(r.Amount)
+			if r.Currency != "" {
+				*currency = r.Currency
+			}
+		}
+	}
+	return cents
 }
