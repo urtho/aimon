@@ -9,14 +9,6 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body data-poll="{{.PollInterval}}">
-  <!-- animated aurora backdrop -->
-  <div class="aurora" aria-hidden="true">
-    <span class="blob b1"></span>
-    <span class="blob b2"></span>
-    <span class="blob b3"></span>
-    <div class="grid-overlay"></div>
-  </div>
-
   <header class="topbar">
     <div class="brand">
       <span class="logo">◈</span>
@@ -34,13 +26,6 @@
       <div class="livebox" title="Live updates via SSE">
         <span class="live-dot" id="live-dot"></span>
         <span id="live-text">connecting…</span>
-      </div>
-      <div class="refresh-ring" id="refresh-ring" title="Next refresh">
-        <svg viewBox="0 0 36 36">
-          <circle class="ring-bg" cx="18" cy="18" r="15.9155" />
-          <circle class="ring-fg" id="ring-fg" cx="18" cy="18" r="15.9155" />
-        </svg>
-        <span class="refresh-count" id="refresh-count">60</span>
       </div>
     </div>
   </header>
@@ -83,7 +68,6 @@
   <!-- card template -->
   <template id="card-tpl">
     <article class="card" tabindex="0">
-      <div class="card-glow"></div>
       <header class="card-head">
         <span class="prov-icon"></span>
         <div class="card-title">

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -90,6 +91,11 @@ func main() {
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		// Derive every request context from the signal context. On SIGINT/SIGTERM
+		// this cancels in-flight requests — crucially the long-lived SSE streams,
+		// which otherwise keep the connection "active" and stall Shutdown for its
+		// full timeout.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 
 	go func() {

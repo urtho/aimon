@@ -11,13 +11,11 @@
     xai:        { icon: "𝕏",  c1: "#cbd5e1", c2: "#7c8aa3" },
   };
 
-  const pollInterval = Math.max(5, parseInt(document.body.dataset.poll, 10) || 60);
   const cardsEl = document.getElementById("cards");
   const emptyEl = document.getElementById("empty");
   const tpl = document.getElementById("card-tpl");
 
   const cards = new Map(); // id -> { root, refs, value, updatedAt, spans }
-  let lastRefresh = Date.now();
 
   // ---------- formatting ----------
   const fmtMoney = (n, unit) => {
@@ -47,19 +45,6 @@
     if (h > 0) return h + "h" + (m > 0 ? String(m).padStart(2, "0") + "m" : "");
     return Math.max(1, m) + "m";
   };
-
-  // ---------- count-up animation ----------
-  function countUp(node, from, to, fmt) {
-    const dur = 650, t0 = performance.now();
-    if (!isFinite(from)) from = to;
-    function frame(t) {
-      const p = Math.min(1, (t - t0) / dur);
-      const e = 1 - Math.pow(1 - p, 3); // easeOutCubic
-      node.textContent = fmt(from + (to - from) * e);
-      if (p < 1) requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
-  }
 
   // ---------- card lifecycle ----------
   function makeCard(id) {
@@ -92,13 +77,12 @@
     emptyEl.hidden = true;
     const seen = new Set();
 
-    list.forEach((s, i) => {
+    list.forEach((s) => {
       const id = s.provider + "/" + s.label;
       seen.add(id);
       let c = cards.get(id);
       if (!c) {
         c = makeCard(id);
-        c.root.style.animationDelay = i * 70 + "ms";
       }
       paint(c, s);
     });
@@ -217,11 +201,7 @@
       unit = "left";
     }
     r.bigUnit.textContent = unit;
-    const fmt = (n) => fmtMoney(n, s.unit);
-    countUp(r.bigVal, c.value, big, fmt);
-    if (isFinite(c.value) && Math.abs(c.value - big) > 1e-9) {
-      r.bigVal.classList.remove("flash"); void r.bigVal.offsetWidth; r.bigVal.classList.add("flash");
-    }
+    r.bigVal.textContent = fmtMoney(big, s.unit);
     c.value = big;
 
     let p = "", sec = "";
@@ -249,26 +229,6 @@
     document.getElementById("total-credit").textContent = has ? fmtMoney(total, "USD") : "—";
   }
 
-  const ringFg = document.getElementById("ring-fg");
-  const refreshCount = document.getElementById("refresh-count");
-  function tickCountdown() {
-    const elapsed = (Date.now() - lastRefresh) / 1000;
-    const remain = Math.max(0, pollInterval - elapsed);
-    refreshCount.textContent = Math.ceil(remain);
-    ringFg.style.strokeDashoffset = -(100 - (remain / pollInterval) * 100);
-  }
-
-  // Refresh relative texts (updated x ago, resets in y) once a second.
-  function tickRelative() {
-    for (const c of cards.values()) {
-      if (c.updatedAt) {
-        const prefix = c.refs.updated.textContent.startsWith("checked") ? "checked " : "updated ";
-        c.refs.updated.textContent = prefix + relTime(c.updatedAt);
-      }
-      if (c.spans) renderSpans(c.refs, c.spans);
-    }
-  }
-
   // ---------- data flow ----------
   async function loadStatus() {
     try {
@@ -281,7 +241,6 @@
   function apply(list) {
     render(list);
     updateSummary(list);
-    lastRefresh = Date.now();
   }
 
   function setLive(on, text) {
@@ -359,6 +318,4 @@
   // ---------- boot ----------
   loadStatus();
   connectSSE();
-  setInterval(tickCountdown, 250);
-  setInterval(tickRelative, 1000);
 })();
