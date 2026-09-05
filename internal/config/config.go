@@ -48,7 +48,7 @@ type Monitor struct {
 	// Subscription / OAuth providers.
 	OAuth        bool   `yaml:"oauth"`         // use the interactive OAuth flow
 	BearerToken  string `yaml:"bearer_token"`  // x.ai: pre-obtained session/bearer token
-	TokenFile    string `yaml:"token_file"`    // x.ai: read a live token from a JSON file (e.g. ~/.hermes/auth.json)
+	TokenFile    string `yaml:"token_file"`    // x.ai: read a live token from a JSON file (e.g. ~/.grok/auth.json)
 	UsageURL     string `yaml:"usage_url"`     // override the usage endpoint
 	AuthorizeURL string `yaml:"authorize_url"` // override the OAuth authorize host (claude/xai)
 	BaseURL      string `yaml:"base_url"`      // override the API base (testing / proxies)

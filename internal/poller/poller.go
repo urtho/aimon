@@ -43,10 +43,15 @@ func New(st *store.Store, interval time.Duration, provs []providers.Provider, lo
 // Run blocks, polling immediately and then every interval until ctx is done.
 func (p *Poller) Run(ctx context.Context) {
 	// Seed the cache from the DB so the UI has data instantly after a restart.
+	// Only keep monitors that are still configured — a renamed label must not
+	// leave a ghost card next to the replacement.
+	want := p.configuredIDs()
 	if seed, err := p.store.LatestStatuses(ctx); err == nil {
 		p.mu.Lock()
 		for _, s := range seed {
-			p.latest[s.ID()] = s
+			if _, ok := want[s.ID()]; ok {
+				p.latest[s.ID()] = s
+			}
 		}
 		p.mu.Unlock()
 	}
@@ -97,12 +102,14 @@ func (p *Poller) pollAll(ctx context.Context) {
 	wg.Wait()
 
 	p.mu.Lock()
+	next := make(map[string]model.Status, len(results))
 	for _, st := range results {
-		p.latest[st.ID()] = st
+		next[st.ID()] = st
 		if err := p.store.WriteSnapshot(ctx, st); err != nil {
 			p.log.Error("write snapshot", "id", st.ID(), "err", err)
 		}
 	}
+	p.latest = next
 	p.mu.Unlock()
 
 	p.hub.broadcast(p.Latest())
@@ -134,6 +141,14 @@ func (p *Poller) pollOne(ctx context.Context, prov providers.Provider) model.Sta
 	}
 	st.UpdatedAt = time.Now().Unix()
 	return st
+}
+
+func (p *Poller) configuredIDs() map[string]struct{} {
+	want := make(map[string]struct{}, len(p.providers))
+	for _, prov := range p.providers {
+		want[prov.ID()+"/"+prov.Label()] = struct{}{}
+	}
+	return want
 }
 
 // Latest returns the current status of every monitor, ordered stably.

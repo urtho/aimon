@@ -262,7 +262,7 @@
   const modal = document.getElementById("oauth-modal");
   let oauthCtx = { provider: "", label: "", state: "" };
 
-  const PROV_NAMES = { xai: "x.ai SuperGrok", claude: "Claude" };
+  const PROV_NAMES = { xai: "Grok", claude: "Claude" };
 
   async function openConnect(provider, label) {
     oauthCtx = { provider, label, state: "" };

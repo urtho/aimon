@@ -22,7 +22,7 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 | **OpenRouter** | Credit balance + rate-limit (`/credits`, `/key`) | `api_key` | ✅ verified |
 | **Anthropic API** | Month-to-date spend, or **credits left** (baseline) | `admin_key` (`sk-ant-admin-…`) | ✅ verified |
 | **Claude Pro/Max** | Subscription connection (usage best-effort) | OAuth — connect in UI | 🔶 OAuth verified, usage best-effort |
-| **x.ai SuperGrok** | Billing-cycle usage (`GetGrokCreditsConfig`) | OAuth — connect in UI (or `token_file`/`bearer_token`) | ✅ |
+| **Grok** | Weekly subscription pool (same meter as Grok Build `/usage`) | OAuth — connect in UI (or `token_file`/`bearer_token`) | ✅ |
 
 > **Anthropic** has no public *prepaid balance* API
 > ([open request](https://github.com/anthropics/anthropic-sdk-python/issues/505)),
@@ -40,12 +40,13 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 > refresh are solid, but the subscription *usage* endpoint is not a stable
 > public contract — set `usage_url` if your plan exposes one.
 >
-> **x.ai SuperGrok** usage comes from the same `grok.com` billing RPC that the
-> Grok CLI's `/usage` command reads. Easiest: click **Connect** and authorize
-> via x.ai's OAuth (PKCE) — the same public desktop client the Grok CLI/Hermes
-> use; tokens are stored and auto-refreshed. Alternatively point `token_file` at
-> a credential file an external tool keeps refreshed (e.g. `~/.hermes/auth.json`
-> or `~/.grok/auth.json`), or supply a static `bearer_token`.
+> **Grok** usage comes from the same `cli-chat-proxy.grok.com` billing endpoint
+> that Grok Build's `/usage` command reads (shared weekly compute pool, shown as
+> % used + reset time). Easiest: click **Connect** and authorize via x.ai's
+> OAuth (PKCE) — the same public desktop client Grok Build uses; tokens are
+> stored and auto-refreshed. Alternatively point `token_file` at
+> `~/.grok/auth.json` (kept live by `grok login`), or supply a static
+> `bearer_token`. An `XAI_API_KEY` only reports API-key status, not this meter.
 
 ---
 
@@ -103,9 +104,9 @@ monitors:
     oauth: true                            # connect once in the UI
 
   - provider: xai
-    label: "SuperGrok (hermes)"
-    token_file: "~/.hermes/auth.json"      # live SuperGrok OAuth token
-    # bearer_token: "${XAI_SESSION_TOKEN}" # or a static token
+    label: "Grok"
+    oauth: true                            # or token_file: "~/.grok/auth.json"
+    # bearer_token: "${XAI_SESSION_TOKEN}"
     # api_key: "${XAI_API_KEY}"            # fallback: API-key status only
 ```
 
@@ -114,7 +115,7 @@ Per-monitor fields: `provider`, `label`, `enabled`, `api_key`, `admin_key`,
 
 ### Connecting a subscription (manual OAuth, PKCE)
 
-Both **Claude** and **x.ai SuperGrok** use an in-app paste-the-code flow:
+Both **Claude** and **Grok** use an in-app paste-the-code flow:
 
 1. Click **Connect** on the card.
 2. Open the authorization page and approve.
