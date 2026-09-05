@@ -41,6 +41,8 @@ func Build(m config.Monitor, oauthMgr *oauth.Manager) (Provider, error) {
 		return newAnthropic(m), nil
 	case "claude":
 		return newClaude(m, oauthMgr), nil
+	case "openai", "codex":
+		return newOpenAI(m, oauthMgr), nil
 	case "xai", "x.ai", "grok":
 		return newXAI(m, oauthMgr), nil
 	default:

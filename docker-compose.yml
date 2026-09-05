@@ -24,10 +24,14 @@ services:
 
     ports:
       - "${AIMON_PORT:-8080}:8080"
+      # Codex/OpenAI registers http://localhost:1455/auth/callback — the
+      # container must listen here so the browser redirect can complete.
+      - "1455:1455"
 
     environment:
       AIMON_LOG: ${AIMON_LOG:-info}
       AIMON_LISTEN: ":8080"
+      AIMON_OAUTH_LISTEN: ":1455"
       AIMON_DATABASE: "/data/aimon.db"
 
     # Secrets referenced as ${...} inside config.yaml come from .env.

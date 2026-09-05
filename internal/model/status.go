@@ -6,7 +6,7 @@ package model
 const (
 	KindCredit       = "credit"       // prepaid balance that draws down (DeepSeek, OpenRouter)
 	KindCost         = "cost"         // accrued spend over a window (Anthropic Admin cost report)
-	KindSubscription = "subscription" // plan usage against rate limits (Claude, x.ai)
+	KindSubscription = "subscription" // plan usage against rate limits (Claude, OpenAI, x.ai)
 )
 
 // Status is the normalized snapshot of a single monitored account at a point

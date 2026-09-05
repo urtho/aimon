@@ -101,8 +101,8 @@ type Pending struct {
 	RedirectURI  string
 }
 
-// TakePending atomically fetches and deletes the pending flow for state.
-func (s *Store) TakePending(ctx context.Context, state string) (Pending, error) {
+// GetPending loads an in-flight authorization without consuming it.
+func (s *Store) GetPending(ctx context.Context, state string) (Pending, error) {
 	var p Pending
 	err := s.db.QueryRowContext(ctx, `
 SELECT state, provider, label, code_verifier, redirect_uri
@@ -111,6 +111,15 @@ FROM oauth_pending WHERE state = ?`, state).
 	if errors.Is(err, sql.ErrNoRows) {
 		return Pending{}, fmt.Errorf("unknown or expired oauth state")
 	}
+	if err != nil {
+		return Pending{}, err
+	}
+	return p, nil
+}
+
+// TakePending atomically fetches and deletes the pending flow for state.
+func (s *Store) TakePending(ctx context.Context, state string) (Pending, error) {
+	p, err := s.GetPending(ctx, state)
 	if err != nil {
 		return Pending{}, err
 	}

@@ -22,6 +22,7 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 | **OpenRouter** | Credit balance + rate-limit (`/credits`, `/key`) | `api_key` | ✅ verified |
 | **Anthropic API** | Month-to-date spend, or **credits left** (baseline) | `admin_key` (`sk-ant-admin-…`) | ✅ verified |
 | **Claude Pro/Max** | Subscription connection (usage best-effort) | OAuth — connect in UI | 🔶 OAuth verified, usage best-effort |
+| **OpenAI / Codex** | Subscription quota windows (% left + resets) | OAuth — connect in UI (or `token_file`/`bearer_token`) | 🔶 Internal usage endpoint, best-effort |
 | **Grok** | Weekly subscription pool (same meter as Grok Build `/usage`) | OAuth — connect in UI (or `token_file`/`bearer_token`) | ✅ |
 
 > **Anthropic** has no public *prepaid balance* API
@@ -39,6 +40,16 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 > **Claude** uses the same OAuth client as Claude Code; the token exchange and
 > refresh are solid, but the subscription *usage* endpoint is not a stable
 > public contract — set `usage_url` if your plan exposes one.
+>
+> **OpenAI** reads the Codex subscription meter through ChatGPT's internal
+> `backend-api/wham/usage` endpoint. It shows the returned session, weekly, and
+> any additional quota windows, with the tightest window used for history.
+> This is Codex subscription usage, not OpenAI API spend or every ChatGPT chat
+> model's message cap. OpenAI documents the corresponding fields in the
+> [Codex account rate-limit interface](https://learn.chatgpt.com/docs/app-server#6-rate-limits-chatgpt);
+> the direct HTTP endpoint is not a stable public API and can change.
+> Use **Connect**, a Codex `token_file`, or a ChatGPT OAuth `bearer_token`.
+> An OpenAI API key does not provide this meter.
 >
 > **Grok** usage comes from the same `cli-chat-proxy.grok.com` billing endpoint
 > that Grok Build's `/usage` command reads (shared weekly compute pool, shown as
@@ -66,7 +77,7 @@ make run                                 # builds + runs on http://localhost:808
 cp config.example.yaml config.yaml
 cp .env.example .env                     # put API keys + your UID/GID here
 docker compose up -d --build
-# → http://localhost:8080  ·  sqlite db persists in ./data
+# → http://localhost:8080  ·  OpenAI OAuth callback on :1455  ·  sqlite db persists in ./data
 ```
 
 The compose stack runs the container **rootless as your host UID/GID** so the
@@ -85,20 +96,9 @@ listen: ":8080"
 database: "./data/aimon.db"      # AIMON_DATABASE env overrides this (compose uses /data)
 poll_interval: 60s               # min 10s
 # public_url: "http://localhost:8080"   # only needed for browser-redirect OAuth
+# oauth_listen: ":1455"                 # Codex/OpenAI loopback; "off" to disable
 
 monitors:
-  - provider: deepseek
-    label: "DeepSeek"
-    api_key: "${DEEPSEEK_API_KEY}"
-
-  - provider: openrouter
-    label: "OpenRouter"
-    api_key: "${OPENROUTER_API_KEY}"
-
-  - provider: anthropic
-    label: "Anthropic API"
-    admin_key: "${ANTHROPIC_ADMIN_KEY}"   # sk-ant-admin-...
-
   - provider: claude
     label: "Claude (Max)"
     oauth: true                            # connect once in the UI
@@ -108,14 +108,62 @@ monitors:
     oauth: true                            # or token_file: "~/.grok/auth.json"
     # bearer_token: "${XAI_SESSION_TOKEN}"
     # api_key: "${XAI_API_KEY}"            # fallback: API-key status only
+
+  - provider: openai
+    label: "OpenAI (Codex)"
+    oauth: true                            # or token_file: "~/.codex/auth.json"
+    # bearer_token: "${OPENAI_ACCESS_TOKEN}"
+    # account_id: "${OPENAI_ACCOUNT_ID}"    # optional workspace override
+
+  - provider: openrouter
+    label: "OpenRouter"
+    api_key: "${OPENROUTER_API_KEY}"
+
+  - provider: deepseek
+    label: "DeepSeek"
+    api_key: "${DEEPSEEK_API_KEY}"
+
+  - provider: anthropic
+    label: "Anthropic API"
+    admin_key: "${ANTHROPIC_ADMIN_KEY}"   # sk-ant-admin-...
+    poll_interval: 30m                   # Admin API is rate-limited
 ```
 
-Per-monitor fields: `provider`, `label`, `enabled`, `api_key`, `admin_key`,
-`oauth`, `bearer_token`, `token_file`, `usage_url`, `base_url`.
+Cards render in list order. Per-monitor fields: `provider`, `label`, `enabled`,
+`poll_interval`, `api_key`, `admin_key`, `oauth`, `bearer_token`, `token_file`,
+`account_id`, `usage_url`, `authorize_url`, `token_url`, `base_url`.
 
-### Connecting a subscription (manual OAuth, PKCE)
+For OpenAI, credentials are selected in this order: `token_file`, `bearer_token`,
+then stored in-app OAuth. The account/workspace is read from the credential file
+or token claims; `account_id` overrides it. With `base_url`, use a ChatGPT backend
+base (normally `https://chatgpt.com/backend-api`); `usage_url` overrides the full URL.
 
-Both **Claude** and **Grok** use an in-app paste-the-code flow:
+To reuse a Codex login, set `token_file: "~/.codex/auth.json"` (or the `auth.json`
+under your custom `CODEX_HOME`). It must contain ChatGPT login tokens; API-key
+login and credentials stored only in the OS keyring cannot be read this way.
+aimon rereads the file on every poll, without writing it or rotating its tokens.
+Keep Codex signed in so it refreshes the file; if authorization fails, sign in
+again with Codex. A static `bearer_token` must be replaced when it expires.
+
+For Docker, **Connect** needs no extra mounts. Compose publishes host port
+**1455** so the OpenAI/Codex browser redirect can reach the container. To use a
+token file instead, mount the host Codex directory read-only, for example
+`/home/you/.codex:/codex:ro`, and configure `token_file: "/codex/auth.json"`.
+Mounting the directory lets aimon see credentials replaced atomically by Codex.
+The container user must have read access to the file.
+
+### Connecting a subscription (OAuth, PKCE)
+
+**OpenAI / Codex** uses a loopback redirect that aimon serves on port **1455**:
+
+1. Click **Connect** on the card and open the authorization page.
+2. Sign in with ChatGPT. The browser returns to
+   `http://localhost:1455/auth/callback`, aimon stores the tokens, and the
+   dashboard updates. You can close the success tab.
+3. If port 1455 is blocked or something else is bound there, paste the full
+   callback URL from the address bar into the Connect dialog instead.
+
+**Claude** and **Grok** still use the paste-the-code flow:
 
 1. Click **Connect** on the card.
 2. Open the authorization page and approve.
@@ -157,6 +205,7 @@ config.yaml ─▶ providers ─▶ poller (every 60s, concurrent)
 | `POST` | `/oauth/complete` | exchange the pasted code |
 | `POST` | `/oauth/disconnect` | forget a stored token |
 | `GET` | `/healthz` | liveness |
+| `GET` | `http://localhost:1455/auth/callback` | OpenAI/Codex OAuth loopback (separate listener) |
 
 ---
 

@@ -10,33 +10,12 @@ poll_interval: 60s
 
 # Externally reachable base URL — only needed for OAuth redirect URIs.
 # public_url: "http://localhost:8080"
+# Codex/OpenAI loopback callback (http://localhost:1455/auth/callback).
+# Defaults to ":1455". Set "off" to disable (Connect then requires pasting the URL).
+# oauth_listen: ":1455"
 
 monitors:
-  # --- Prepaid credit balances (fully supported) ---------------------------
-  - provider: deepseek
-    label: "DeepSeek"
-    api_key: "${DEEPSEEK_API_KEY}"
-
-  - provider: openrouter
-    label: "OpenRouter"
-    api_key: "${OPENROUTER_API_KEY}"
-
-  # --- Anthropic API (Admin API) -------------------------------------------
-  # Requires an Admin API key (sk-ant-admin-...), NOT a normal API key.
-  # Default: shows month-to-date spend (Anthropic has no public balance API).
-  # To show "credits left" like the Console: set credit_balance to the balance
-  # you saw and credit_as_of to WHEN you saw it — aimon reports remaining =
-  # credit_balance − spend since then. Bump it whenever you buy more credits.
-  #
-  # IMPORTANT: use a full timestamp, not just a date. The cost report only has
-  # daily UTC buckets, so with a bare date the whole day's spend is subtracted —
-  # including spend made BEFORE you read the balance, driving the value
-  # negative. With a timestamp, counting starts at the next UTC midnight.
-  - provider: anthropic
-    label: "Anthropic API"
-    admin_key: "${ANTHROPIC_ADMIN_KEY}"
-    # credit_balance: 19.70
-    # credit_as_of: "2026-06-12T16:00:00+02:00"
+  # Dashboard cards follow this list order.
 
   # --- Subscription usage via OAuth (best-effort) --------------------------
   # Claude Pro/Max: connect once at /  (Connect button) — opens the Anthropic
@@ -57,3 +36,46 @@ monitors:
     # token_file: "~/.grok/auth.json"
     # bearer_token: "${XAI_SESSION_TOKEN}"
     # api_key: "${XAI_API_KEY}"
+
+  # OpenAI / Codex subscription: click Connect and sign in with ChatGPT.
+  # aimon listens on localhost:1455 for the registered OAuth callback and
+  # completes the login automatically. If that page cannot load, paste the
+  # full callback URL from the address bar. Shows remaining quota and resets
+  # for the windows reported by Codex. Alternatively, read Codex CLI
+  # credentials live; the CLI owns their refresh. API keys do not provide
+  # subscription usage. The usage endpoint is internal to ChatGPT and may
+  # change (override with usage_url if necessary).
+  - provider: openai
+    label: "OpenAI (Codex)"
+    oauth: true
+    # token_file: "~/.codex/auth.json"
+    # bearer_token: "${OPENAI_ACCESS_TOKEN}"
+    # account_id: "${OPENAI_ACCOUNT_ID}"    # optional workspace override
+
+  # --- Prepaid credit balances (fully supported) ---------------------------
+  - provider: openrouter
+    label: "OpenRouter"
+    api_key: "${OPENROUTER_API_KEY}"
+
+  - provider: deepseek
+    label: "DeepSeek"
+    api_key: "${DEEPSEEK_API_KEY}"
+
+  # --- Anthropic API (Admin API) -------------------------------------------
+  # Requires an Admin API key (sk-ant-admin-...), NOT a normal API key.
+  # Default: shows month-to-date spend (Anthropic has no public balance API).
+  # To show "credits left" like the Console: set credit_balance to the balance
+  # you saw and credit_as_of to WHEN you saw it — aimon reports remaining =
+  # credit_balance − spend since then. Bump it whenever you buy more credits.
+  #
+  # IMPORTANT: use a full timestamp, not just a date. The cost report only has
+  # daily UTC buckets, so with a bare date the whole day's spend is subtracted —
+  # including spend made BEFORE you read the balance, driving the value
+  # negative. With a timestamp, counting starts at the next UTC midnight.
+  # poll_interval: 30m avoids Admin API rate limits (the global default is 60s).
+  - provider: anthropic
+    label: "Anthropic API"
+    admin_key: "${ANTHROPIC_ADMIN_KEY}"
+    poll_interval: 30m
+    # credit_balance: 19.70
+    # credit_as_of: "2026-06-12T16:00:00+02:00"

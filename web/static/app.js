@@ -8,6 +8,7 @@
     openrouter: { icon: "OR", c1: "#22d3ee", c2: "#3b82f6" },
     anthropic:  { icon: "AN", c1: "#d97757", c2: "#f59e0b" },
     claude:     { icon: "C",  c1: "#d97757", c2: "#c0623f" },
+    openai:     { icon: "AI", c1: "#10a37f", c2: "#34d399" },
     xai:        { icon: "𝕏",  c1: "#cbd5e1", c2: "#7c8aa3" },
   };
 
@@ -16,6 +17,11 @@
   const tpl = document.getElementById("card-tpl");
 
   const cards = new Map(); // id -> { root, refs, value, updatedAt, spans }
+  let oauthCtx = { provider: "", label: "", state: "" };
+  const setModalMsg = (t, err) => {
+    const m = document.getElementById("oauth-msg");
+    m.textContent = t; m.className = "modal-msg " + (err ? "err" : "ok");
+  };
 
   // ---------- formatting ----------
   const fmtMoney = (n, unit) => {
@@ -84,6 +90,7 @@
       if (!c) {
         c = makeCard(id);
       }
+      cardsEl.appendChild(c.root);
       paint(c, s);
     });
 
@@ -241,6 +248,14 @@
   function apply(list) {
     render(list);
     updateSummary(list);
+    const oauthModal = document.getElementById("oauth-modal");
+    if (oauthModal && !oauthModal.hidden && oauthCtx.provider) {
+      const match = (list || []).find((s) => s.provider === oauthCtx.provider && s.label === oauthCtx.label);
+      if (match && match.ok && !match.needs_auth) {
+        setModalMsg("connected ✓", false);
+        setTimeout(() => { oauthModal.hidden = true; }, 800);
+      }
+    }
   }
 
   function setLive(on, text) {
@@ -260,15 +275,21 @@
 
   // ---------- OAuth modal ----------
   const modal = document.getElementById("oauth-modal");
-  let oauthCtx = { provider: "", label: "", state: "" };
 
-  const PROV_NAMES = { xai: "Grok", claude: "Claude" };
+  const PROV_NAMES = { xai: "Grok", claude: "Claude", openai: "OpenAI / Codex" };
+  const STEP2 = {
+    openai: "After you approve, a success page should open on localhost:1455 — close it; this dashboard updates automatically. If that page cannot load, paste the full callback URL from the address bar.",
+    xai: "x.ai redirects to a loopback URL that will not load. Copy the full URL from the address bar.",
+    claude: "Copy the code#state string shown on the page.",
+  };
 
   async function openConnect(provider, label) {
     oauthCtx = { provider, label, state: "" };
     document.getElementById("oauth-provider").textContent = PROV_NAMES[provider] || provider;
     document.getElementById("oauth-msg").textContent = "";
     document.getElementById("oauth-code").value = "";
+    const step2 = document.getElementById("oauth-step-2");
+    if (step2) step2.textContent = STEP2[provider] || "Copy the code it shows, or the full URL from the address bar.";
     const open = document.getElementById("oauth-open");
     open.removeAttribute("href");
     modal.hidden = false;
@@ -286,10 +307,6 @@
   }
 
   function closeModal() { modal.hidden = true; }
-  const setModalMsg = (t, err) => {
-    const m = document.getElementById("oauth-msg");
-    m.textContent = t; m.className = "modal-msg " + (err ? "err" : "ok");
-  };
 
   async function submitOAuth() {
     const code = document.getElementById("oauth-code").value.trim();

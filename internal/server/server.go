@@ -70,6 +70,20 @@ func (s *Server) Handler() http.Handler {
 	return s.withLogging(mux)
 }
 
+// LoopbackHandler serves Codex/OpenAI's registered OAuth redirect
+// (http://localhost:1455/auth/callback). It is a separate listener because
+// the public client id only accepts that exact URI — it cannot be rewritten
+// to the dashboard port.
+func (s *Server) LoopbackHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /auth/callback", s.handleOAuthCallback)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("aimon OpenAI OAuth callback listener\n"))
+	})
+	return s.withLogging(mux)
+}
+
 type pageData struct {
 	PollInterval int
 	Version      string

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,8 +56,9 @@ func main() {
 
 	oauthMgr := oauth.New(st)
 
-	// Build the enabled providers.
+	// Build the enabled providers. Order is dashboard order.
 	var provs []providers.Provider
+	var cadence []time.Duration
 	for _, m := range cfg.Monitors {
 		if !m.IsEnabled() {
 			continue
@@ -67,13 +69,18 @@ func main() {
 			continue
 		}
 		provs = append(provs, p)
-		log.Info("monitor enabled", "provider", p.ID(), "label", p.Label(), "kind", p.Kind())
+		cadence = append(cadence, m.PollInterval)
+		if m.PollInterval > 0 {
+			log.Info("monitor enabled", "provider", p.ID(), "label", p.Label(), "kind", p.Kind(), "poll", m.PollInterval)
+		} else {
+			log.Info("monitor enabled", "provider", p.ID(), "label", p.Label(), "kind", p.Kind())
+		}
 	}
 	if len(provs) == 0 {
 		log.Warn("no monitors enabled — the dashboard will be empty (check config.yaml)")
 	}
 
-	pl := poller.New(st, cfg.PollInterval, provs, log)
+	pl := poller.New(st, cfg.PollInterval, provs, cadence, log)
 
 	srv, err := server.New(cfg, st, pl, oauthMgr, provs, version, log)
 	if err != nil {
@@ -87,24 +94,38 @@ func main() {
 	// Run the poller for the lifetime of the process.
 	go pl.Run(ctx)
 
-	httpSrv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           srv.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		// Derive every request context from the signal context. On SIGINT/SIGTERM
-		// this cancels in-flight requests — crucially the long-lived SSE streams,
-		// which otherwise keep the connection "active" and stall Shutdown for its
-		// full timeout.
-		BaseContext: func(net.Listener) context.Context { return ctx },
+	startHTTP := func(name, addr string, handler http.Handler, fatal bool) *http.Server {
+		httpSrv := &http.Server{
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			// Derive every request context from the signal context. On SIGINT/SIGTERM
+			// this cancels in-flight requests — crucially the long-lived SSE streams,
+			// which otherwise keep the connection "active" and stall Shutdown for its
+			// full timeout.
+			BaseContext: func(net.Listener) context.Context { return ctx },
+		}
+		go func() {
+			log.Info("listening", "name", name, "addr", addr)
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				if !fatal {
+					log.Warn("oauth loopback listener failed — paste the callback URL to Connect",
+						"addr", addr, "err", err)
+					return
+				}
+				log.Error("http server", "err", err)
+				stop()
+			}
+		}()
+		return httpSrv
 	}
 
-	go func() {
-		log.Info("listening", "addr", cfg.Listen, "url", "http://localhost"+cfg.Listen)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("http server", "err", err)
-			stop()
-		}
-	}()
+	httpSrv := startHTTP("dashboard", cfg.Listen, srv.Handler(), true)
+	var oauthSrv *http.Server
+	if !strings.EqualFold(cfg.OAuthListen, "off") {
+		oauthSrv = startHTTP("oauth-loopback", cfg.OAuthListen, srv.LoopbackHandler(), false)
+		log.Info("openai oauth callback", "url", "http://localhost:1455/auth/callback")
+	}
 
 	<-ctx.Done()
 	log.Info("shutdown signal received")
@@ -113,6 +134,11 @@ func main() {
 	defer cancel()
 	if err := httpSrv.Shutdown(shutCtx); err != nil {
 		log.Error("graceful shutdown", "err", err)
+	}
+	if oauthSrv != nil {
+		if err := oauthSrv.Shutdown(shutCtx); err != nil {
+			log.Error("oauth loopback shutdown", "err", err)
+		}
 	}
 	log.Info("bye")
 }

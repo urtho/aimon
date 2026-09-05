@@ -42,6 +42,6 @@ COPY --from=builder --chown=65532:65532 /out/aimon /usr/local/bin/aimon
 
 USER 65532:65532
 WORKDIR /data
-EXPOSE 8080
+EXPOSE 8080 1455
 
 ENTRYPOINT ["/usr/local/bin/aimon", "--config", "/etc/aimon/config.yaml"]

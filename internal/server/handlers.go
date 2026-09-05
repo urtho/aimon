@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"strconv"
 	"time"
@@ -189,4 +190,80 @@ func (s *Server) handleOAuthDisconnect(w http.ResponseWriter, r *http.Request) {
 	}
 	s.poller.PollNow()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// GET /auth/callback — Codex/OpenAI loopback redirect (listens on :1455).
+func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if errCode := q.Get("error"); errCode != "" {
+		if state := q.Get("state"); state != "" {
+			_, _ = s.store.TakePending(r.Context(), state)
+		}
+		msg := q.Get("error_description")
+		if msg == "" {
+			msg = errCode
+		}
+		writeCallbackPage(w, http.StatusBadRequest, "Authorization failed", msg, false)
+		return
+	}
+	code := q.Get("code")
+	state := q.Get("state")
+	if code == "" || state == "" {
+		writeCallbackPage(w, http.StatusBadRequest, "Authorization failed",
+			"missing code or state in the callback", false)
+		return
+	}
+	pending, err := s.store.GetPending(r.Context(), state)
+	if err != nil {
+		writeCallbackPage(w, http.StatusBadRequest, "Authorization failed",
+			"this login attempt expired or was already used — click Connect again in aimon", false)
+		return
+	}
+	op := s.oauthProvider(pending.Provider, pending.Label)
+	if op == nil {
+		writeCallbackPage(w, http.StatusBadRequest, "Authorization failed",
+			"no matching monitor for this login", false)
+		return
+	}
+	if err := s.oauth.Complete(r.Context(), op.OAuthConfig(), state, code); err != nil {
+		s.log.Error("oauth callback exchange", "provider", pending.Provider, "label", pending.Label, "err", err)
+		writeCallbackPage(w, http.StatusBadRequest, "Authorization failed",
+			"could not complete OpenAI login — try Connect again", false)
+		return
+	}
+	s.log.Info("oauth connected", "provider", pending.Provider, "label", pending.Label)
+	s.poller.PollNow()
+	writeCallbackPage(w, http.StatusOK, "Connected",
+		"OpenAI is connected. You can close this tab and return to the aimon dashboard.", true)
+}
+
+func writeCallbackPage(w http.ResponseWriter, status int, title, message string, ok bool) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	color := "#ff5f56"
+	if ok {
+		color = "#33ff66"
+	}
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>aimon · %s</title>
+<style>
+  html,body{height:100%%;margin:0;background:#050805;color:#33ff66;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  main{min-height:100%%;display:grid;place-items:center;padding:24px}
+  .card{max-width:36rem;border:1px solid #1c3a1c;border-radius:4px;padding:28px 32px}
+  h1{margin:0 0 12px;font-size:20px;color:%s}
+  p{margin:0;color:#1f9d4f;line-height:1.5}
+</style>
+</head>
+<body data-ok="%t">
+<main><div class="card"><h1>%s</h1><p>%s</p></div></main>
+</body>
+</html>
+`, html.EscapeString(title), color, ok, html.EscapeString(title), html.EscapeString(message))
 }

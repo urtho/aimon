@@ -5,7 +5,6 @@ package poller
 import (
 	"context"
 	"log/slog"
-	"sort"
 	"sync"
 	"time"
 
@@ -19,6 +18,8 @@ type Poller struct {
 	store     *store.Store
 	interval  time.Duration
 	providers []providers.Provider
+	cadence   []time.Duration // per-provider period; 0 means interval
+	lastPoll  []time.Time
 	log       *slog.Logger
 
 	mu      sync.RWMutex
@@ -27,12 +28,24 @@ type Poller struct {
 	trigger chan struct{}
 }
 
-// New builds a Poller. interval is the refresh cadence (e.g. 60s).
-func New(st *store.Store, interval time.Duration, provs []providers.Provider, log *slog.Logger) *Poller {
+// New builds a Poller. interval is the default refresh cadence (e.g. 60s).
+// cadence is an optional per-provider period aligned with provs; a zero
+// entry uses interval. Dashboard order follows provs, not alphabetical.
+func New(st *store.Store, interval time.Duration, provs []providers.Provider, cadence []time.Duration, log *slog.Logger) *Poller {
+	cad := make([]time.Duration, len(provs))
+	for i := range provs {
+		if i < len(cadence) && cadence[i] > 0 {
+			cad[i] = cadence[i]
+		} else {
+			cad[i] = interval
+		}
+	}
 	return &Poller{
 		store:     st,
 		interval:  interval,
 		providers: provs,
+		cadence:   cad,
+		lastPoll:  make([]time.Time, len(provs)),
 		log:       log,
 		latest:    make(map[string]model.Status),
 		hub:       newHub(),
@@ -56,9 +69,9 @@ func (p *Poller) Run(ctx context.Context) {
 		p.mu.Unlock()
 	}
 
-	p.pollAll(ctx)
+	p.pollAll(ctx, true)
 
-	ticker := time.NewTicker(p.interval)
+	ticker := time.NewTicker(p.tickInterval())
 	defer ticker.Stop()
 	prune := time.NewTicker(6 * time.Hour)
 	defer prune.Stop()
@@ -69,15 +82,28 @@ func (p *Poller) Run(ctx context.Context) {
 			p.log.Info("poller stopping")
 			return
 		case <-ticker.C:
-			p.pollAll(ctx)
+			p.pollAll(ctx, false)
 		case <-p.trigger:
-			p.pollAll(ctx)
+			p.pollAll(ctx, true)
 		case <-prune.C:
 			if n, err := p.store.Prune(ctx, time.Now().AddDate(0, 0, -30)); err == nil && n > 0 {
 				p.log.Info("pruned old snapshots", "rows", n)
 			}
 		}
 	}
+}
+
+func (p *Poller) tickInterval() time.Duration {
+	tick := p.interval
+	for _, d := range p.cadence {
+		if d > 0 && d < tick {
+			tick = d
+		}
+	}
+	if tick <= 0 {
+		return time.Minute
+	}
+	return tick
 }
 
 // PollNow requests an out-of-band refresh (e.g. right after an OAuth connect).
@@ -88,11 +114,18 @@ func (p *Poller) PollNow() {
 	}
 }
 
-// pollAll refreshes every provider concurrently and broadcasts the results.
-func (p *Poller) pollAll(ctx context.Context) {
+// pollAll refreshes due providers concurrently and broadcasts the results.
+// force fetches every monitor regardless of its cadence (startup, PollNow).
+func (p *Poller) pollAll(ctx context.Context, force bool) {
+	now := time.Now()
 	var wg sync.WaitGroup
 	results := make([]model.Status, len(p.providers))
+	fetched := make([]bool, len(p.providers))
 	for i, prov := range p.providers {
+		if !force && !p.lastPoll[i].IsZero() && now.Sub(p.lastPoll[i]) < p.cadence[i] {
+			continue
+		}
+		fetched[i] = true
 		wg.Add(1)
 		go func(i int, prov providers.Provider) {
 			defer wg.Done()
@@ -102,9 +135,17 @@ func (p *Poller) pollAll(ctx context.Context) {
 	wg.Wait()
 
 	p.mu.Lock()
-	next := make(map[string]model.Status, len(results))
-	for _, st := range results {
+	next := make(map[string]model.Status, len(p.providers))
+	for k, v := range p.latest {
+		next[k] = v
+	}
+	for i, ok := range fetched {
+		if !ok {
+			continue
+		}
+		st := results[i]
 		next[st.ID()] = st
+		p.lastPoll[i] = now
 		if err := p.store.WriteSnapshot(ctx, st); err != nil {
 			p.log.Error("write snapshot", "id", st.ID(), "err", err)
 		}
@@ -151,20 +192,16 @@ func (p *Poller) configuredIDs() map[string]struct{} {
 	return want
 }
 
-// Latest returns the current status of every monitor, ordered stably.
+// Latest returns the current status of every monitor, in config order.
 func (p *Poller) Latest() []model.Status {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	out := make([]model.Status, 0, len(p.latest))
-	for _, s := range p.latest {
-		out = append(out, s)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Provider != out[j].Provider {
-			return out[i].Provider < out[j].Provider
+	out := make([]model.Status, 0, len(p.providers))
+	for _, prov := range p.providers {
+		if s, ok := p.latest[prov.ID()+"/"+prov.Label()]; ok {
+			out = append(out, s)
 		}
-		return out[i].Label < out[j].Label
-	})
+	}
 	return out
 }
 

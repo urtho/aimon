@@ -23,6 +23,10 @@ type Config struct {
 	// PublicURL is the externally reachable base URL, used to build OAuth
 	// redirect URIs. Optional; falls back to the request host.
 	PublicURL string `yaml:"public_url"`
+	// OAuthListen is the bind address for Codex/OpenAI's registered loopback
+	// redirect (http://localhost:1455/auth/callback). Defaults to ":1455".
+	// Set to "off" (or AIMON_OAUTH_LISTEN=off) to disable the listener.
+	OAuthListen string `yaml:"oauth_listen"`
 	// Monitors is the flat list of accounts to watch.
 	Monitors []Monitor `yaml:"monitors"`
 }
@@ -30,9 +34,13 @@ type Config struct {
 // Monitor describes one account to poll. Only the fields relevant to the chosen
 // provider are read; the rest may be left empty.
 type Monitor struct {
-	Provider string `yaml:"provider"` // deepseek | openrouter | anthropic | claude | xai
+	Provider string `yaml:"provider"` // deepseek | openrouter | anthropic | claude | openai | xai
 	Label    string `yaml:"label"`    // display name / account id (unique per provider)
 	Enabled  *bool  `yaml:"enabled"`  // defaults to true when omitted
+
+	// PollInterval overrides the top-level poll_interval for this monitor.
+	// Zero means "use the global default". Minimum 10s.
+	PollInterval time.Duration `yaml:"poll_interval"`
 
 	// Credit/cost providers.
 	APIKey   string `yaml:"api_key"`   // DeepSeek, OpenRouter, x.ai
@@ -47,10 +55,12 @@ type Monitor struct {
 
 	// Subscription / OAuth providers.
 	OAuth        bool   `yaml:"oauth"`         // use the interactive OAuth flow
-	BearerToken  string `yaml:"bearer_token"`  // x.ai: pre-obtained session/bearer token
-	TokenFile    string `yaml:"token_file"`    // x.ai: read a live token from a JSON file (e.g. ~/.grok/auth.json)
+	BearerToken  string `yaml:"bearer_token"`  // OpenAI/x.ai: pre-obtained OAuth access token
+	TokenFile    string `yaml:"token_file"`    // live CLI credentials, e.g. ~/.codex/auth.json or ~/.grok/auth.json
+	AccountID    string `yaml:"account_id"`    // OpenAI: optional ChatGPT workspace/account override
 	UsageURL     string `yaml:"usage_url"`     // override the usage endpoint
-	AuthorizeURL string `yaml:"authorize_url"` // override the OAuth authorize host (claude/xai)
+	AuthorizeURL string `yaml:"authorize_url"` // override the OAuth authorize endpoint
+	TokenURL     string `yaml:"token_url"`     // override the OAuth token endpoint
 	BaseURL      string `yaml:"base_url"`      // override the API base (testing / proxies)
 }
 
@@ -91,9 +101,15 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("AIMON_DATABASE"); v != "" {
 		c.Database = v
 	}
+	if v := os.Getenv("AIMON_OAUTH_LISTEN"); v != "" {
+		c.OAuthListen = v
+	}
 
 	if c.Listen == "" {
 		c.Listen = ":8080"
+	}
+	if c.OAuthListen == "" {
+		c.OAuthListen = ":1455"
 	}
 	if c.Database == "" {
 		c.Database = "./data/aimon.db"
@@ -113,6 +129,9 @@ func Load(path string) (*Config, error) {
 		if m.Label == "" {
 			// Default the label to the provider name so it's always addressable.
 			c.Monitors[i].Label = m.Provider
+		}
+		if c.Monitors[i].PollInterval > 0 && c.Monitors[i].PollInterval < 10*time.Second {
+			c.Monitors[i].PollInterval = 10 * time.Second
 		}
 	}
 	return &c, nil
