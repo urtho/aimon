@@ -81,6 +81,9 @@ main { padding: 18px clamp(16px, 4vw, 48px) 40px; }
 .card:hover, .card:focus-visible { border-color: var(--border-bright); }
 .card.state-error { --c1: var(--err); }
 .card.state-warn  { --c1: var(--warn); }
+.card.state-below { --c1: var(--ok); }
+.card.state-at    { --c1: var(--warn); }
+.card.state-over  { --c1: var(--err); }
 
 .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .prov-icon {
@@ -94,9 +97,9 @@ main { padding: 18px clamp(16px, 4vw, 48px) 40px; }
 .card-title .label { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-title .kind { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--txt-dim); }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--txt-faint); flex: none; }
-.status-dot.ok   { background: var(--ok); }
-.status-dot.warn { background: var(--warn); }
-.status-dot.err  { background: var(--err); }
+.status-dot.ok, .status-dot.below { background: var(--ok); }
+.status-dot.at, .status-dot.warn { background: var(--warn); }
+.status-dot.over, .status-dot.err { background: var(--err); }
 
 /* ---------- Big value (credits left / spend) ---------- */
 .value-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 22px 0 16px; }
@@ -108,10 +111,11 @@ main { padding: 18px clamp(16px, 4vw, 48px) 40px; }
 
 /* ---------- Quota spans (one row per window) ---------- */
 .spans { display: flex; flex-direction: column; gap: 8px; margin: 16px 2px 12px; }
-.span-row { display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
-.span-pct { font-size: 20px; font-weight: 700; line-height: 1; color: var(--ok); min-width: 54px; }
-.span-pct.mid { color: var(--warn); }
-.span-pct.low { color: var(--err); }
+.span-row { display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+.span-pct { font-size: 20px; font-weight: 700; line-height: 1; color: var(--txt); min-width: 54px; }
+.span-pct.below { color: var(--ok); }
+.span-pct.at { color: var(--warn); }
+.span-pct.over { color: var(--err); }
 .span-name { font-size: 13px; font-weight: 600; color: var(--txt); }
 .span-reset { margin-left: auto; font-size: 12px; color: var(--txt-dim); }
 

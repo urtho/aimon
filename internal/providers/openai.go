@@ -246,7 +246,12 @@ func parseOpenAIUsage(label string, raw []byte, now time.Time) (model.Status, er
 			if reset <= 0 && window.ResetAfterSeconds != nil && *window.ResetAfterSeconds >= 0 {
 				reset = now.Unix() + *window.ResetAfterSeconds
 			}
-			spans = append(spans, model.Span{Name: name, Used: clampPct(*window.UsedPercent), ResetAt: max(0, reset)})
+			spans = append(spans, model.Span{
+				Name:     name,
+				Used:     clampPct(*window.UsedPercent),
+				ResetAt:  max(0, reset),
+				Duration: max(0, window.LimitWindowSeconds),
+			})
 		}
 	}
 	appendLimits(usage.RateLimit, "")

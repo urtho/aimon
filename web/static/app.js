@@ -52,6 +52,40 @@
     return Math.max(1, m) + "m";
   };
 
+  // Linear spend across a quota window. ±5pp of expected used counts as "at".
+  const PACE_SLACK = 5;
+  const PACE_RANK = { below: 1, at: 2, over: 3 };
+  const windowSeconds = (sp) => {
+    if (sp.duration > 0) return sp.duration;
+    const m = String(sp.name || "").match(/(\d+)\s*(mo|w|d|h|m|s)\b/i);
+    if (!m) return 0;
+    const n = +m[1];
+    return { mo: n * 30 * 86400, w: n * 7 * 86400, d: n * 86400, h: n * 3600, m: n * 60, s: n }[m[2].toLowerCase()] || 0;
+  };
+  const linearUsed = (sp, nowSec) => {
+    const dur = windowSeconds(sp);
+    if (dur <= 0 || !sp.reset_at) return null;
+    let elapsed = dur - (sp.reset_at - nowSec);
+    if (elapsed < 0) elapsed = 0;
+    if (elapsed > dur) elapsed = dur;
+    return 100 * elapsed / dur;
+  };
+  const paceOf = (sp, nowSec) => {
+    const expected = linearUsed(sp, nowSec);
+    if (expected == null) return null;
+    const d = sp.used - expected;
+    const cls = d > PACE_SLACK ? "over" : d < -PACE_SLACK ? "below" : "at";
+    return { class: cls, expected };
+  };
+  const worstPace = (spans, nowSec) => {
+    let worst = "";
+    for (const sp of spans || []) {
+      const p = paceOf(sp, nowSec);
+      if (p && (PACE_RANK[p.class] || 0) > (PACE_RANK[worst] || 0)) worst = p.class;
+    }
+    return worst;
+  };
+
   // ---------- card lifecycle ----------
   function makeCard(id) {
     const root = tpl.content.firstElementChild.cloneNode(true);
@@ -101,20 +135,23 @@
   }
 
   // One row per quota span: "92%  /5h        resets 4h32m"
+  // Percent color is vs linear spend: below (green), at (amber), over (red).
   function renderSpans(r, spans) {
     if (!spans || !spans.length) {
       r.spans.hidden = true;
       r.spans.replaceChildren();
       return;
     }
+    const nowSec = Date.now() / 1000;
     r.spans.hidden = false;
     r.spans.replaceChildren(...spans.map((sp) => {
       const left = Math.max(0, Math.round(100 - sp.used));
+      const pace = paceOf(sp, nowSec);
       const row = document.createElement("div");
-      row.className = "span-row";
+      row.className = "span-row" + (pace ? " pace-" + pace.class : "");
 
       const pct = document.createElement("span");
-      pct.className = "span-pct" + (left <= 10 ? " low" : left <= 25 ? " mid" : "");
+      pct.className = "span-pct" + (pace ? " " + pace.class : "");
       pct.textContent = left + "%";
 
       const name = document.createElement("span");
@@ -123,7 +160,10 @@
 
       const reset = document.createElement("span");
       reset.className = "span-reset";
-      reset.textContent = sp.reset_at ? "resets " + fmtDur(sp.reset_at - Date.now() / 1000) : "";
+      reset.textContent = sp.reset_at ? "resets " + fmtDur(sp.reset_at - nowSec) : "";
+      if (pace) {
+        row.title = pace.class === "at" ? "on linear spend" : pace.class + " linear spend";
+      }
 
       row.append(pct, name, reset);
       return row;
@@ -141,14 +181,26 @@
     c.updatedAt = s.updated_at;
     c.spans = null;
 
-    // status state
+    // status state: auth/error win; otherwise subscription pace vs linear spend.
     let state = "ok";
     if (!s.ok && s.needs_auth) state = "warn";
     else if (!s.ok) state = "error";
+    else if (s.kind === "subscription") {
+      const p = worstPace(s.spans, Date.now() / 1000);
+      if (p) state = p;
+    }
     c.root.classList.toggle("state-error", state === "error");
     c.root.classList.toggle("state-warn", state === "warn");
-    r.dot.className = "status-dot " + (state === "ok" ? "ok" : state === "warn" ? "warn" : "err");
-    r.dot.title = s.ok ? "OK" : s.error || "error";
+    c.root.classList.toggle("state-below", state === "below");
+    c.root.classList.toggle("state-at", state === "at");
+    c.root.classList.toggle("state-over", state === "over");
+    const dot = { ok: "ok", below: "below", at: "at", over: "over", warn: "warn", error: "err" }[state] || "ok";
+    r.dot.className = "status-dot " + dot;
+    r.dot.title = !s.ok ? (s.error || "error") : state === "ok" ? "OK"
+      : state === "below" ? "below linear spend"
+      : state === "at" ? "on linear spend"
+      : state === "over" ? "over linear spend"
+      : s.error || state;
 
     // connect button for OAuth providers needing auth
     r.connect.hidden = !s.needs_auth;

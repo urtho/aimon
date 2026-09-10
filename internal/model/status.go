@@ -48,11 +48,13 @@ type Status struct {
 }
 
 // Span is one quota window of a subscription. Used is the percentage consumed
-// (0..100); ResetAt is when the window rolls over.
+// (0..100); ResetAt is when the window rolls over. Duration is the window
+// length in seconds (optional; inferred from Name when omitted).
 type Span struct {
-	Name    string  `json:"name"`               // short label, e.g. "5h", "1w"
-	Used    float64 `json:"used"`               // percent used, 0..100
-	ResetAt int64   `json:"reset_at,omitempty"` // unix seconds
+	Name     string  `json:"name"`               // short label, e.g. "5h", "1w"
+	Used     float64 `json:"used"`               // percent used, 0..100
+	ResetAt  int64   `json:"reset_at,omitempty"` // unix seconds
+	Duration int64   `json:"duration,omitempty"` // window length in seconds
 }
 
 // ID is the stable identity of a monitor: provider + label. Used as the map key

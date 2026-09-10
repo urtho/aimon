@@ -193,14 +193,15 @@ func (c *claude) applyLastSpans(st *model.Status) bool {
 // claudeWindowLabels maps the usage endpoint's window keys to short row labels
 // and a display order (shortest window first).
 var claudeWindowLabels = map[string]struct {
-	label string
-	order int
+	label    string
+	order    int
+	duration int64
 }{
-	"five_hour":            {"5h", 0},
-	"seven_day":            {"1w", 1},
-	"seven_day_opus":       {"1w opus", 2},
-	"seven_day_sonnet":     {"1w sonnet", 3},
-	"seven_day_oauth_apps": {"1w apps", 4},
+	"five_hour":            {"5h", 0, 5 * 3600},
+	"seven_day":            {"1w", 1, 7 * 24 * 3600},
+	"seven_day_opus":       {"1w opus", 2, 7 * 24 * 3600},
+	"seven_day_sonnet":     {"1w sonnet", 3, 7 * 24 * 3600},
+	"seven_day_oauth_apps": {"1w apps", 4, 7 * 24 * 3600},
 }
 
 // parseClaudeUsage extracts the per-window quota spans from the OAuth usage
@@ -224,11 +225,14 @@ func parseClaudeUsage(m map[string]any) []model.Span {
 		switch t := v.(type) {
 		case map[string]any:
 			if u, uok := toFloat(t["utilization"]); uok {
-				label, order := name, 100 // unknown windows: raw key, listed last
+				label, order, dur := name, 100, int64(0) // unknown windows: raw key, listed last
 				if def, known := claudeWindowLabels[name]; known {
-					label, order = def.label, def.order
+					label, order, dur = def.label, def.order, def.duration
 				}
-				sp := model.Span{Name: label, Used: clampPct(u)}
+				if dur == 0 {
+					dur = model.ParseWindowDuration(label)
+				}
+				sp := model.Span{Name: label, Used: clampPct(u), Duration: dur}
 				if r, rok := toUnix(t["resets_at"]); rok {
 					sp.ResetAt = r
 				}

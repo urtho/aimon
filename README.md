@@ -199,6 +199,7 @@ config.yaml ─▶ providers ─▶ poller (every 60s, concurrent)
 |---|---|---|
 | `GET` | `/` | dashboard |
 | `GET` | `/api/status` | latest status of every monitor (JSON) |
+| `GET` | `/api/waybar` | Waybar custom-module JSON (`text`, `tooltip`, `class`, `percentage`) |
 | `GET` | `/api/history?provider=&label=&hours=` | sparkline series |
 | `GET` | `/api/stream` | Server-Sent Events (live updates) |
 | `GET` | `/oauth/start?provider=&label=` | begin an OAuth flow |
@@ -206,6 +207,53 @@ config.yaml ─▶ providers ─▶ poller (every 60s, concurrent)
 | `POST` | `/oauth/disconnect` | forget a stored token |
 | `GET` | `/healthz` | liveness |
 | `GET` | `http://localhost:1455/auth/callback` | OpenAI/Codex OAuth loopback (separate listener) |
+
+`/api/waybar` is the latest snapshot already formatted for a [Waybar](https://github.com/Alexays/Waybar) `custom` module (`return-type: json`). Optional query filters (`provider`, `label`, `kind`) take comma-separated, case-insensitive values — e.g. `?kind=subscription` or `?provider=claude,xai,openai`.
+
+```json
+{
+  "text": "C 92% · X 58% · AI 75%",
+  "tooltip": "Claude (Max)  Max\n  92%/5h  resets 4h32m\n…",
+  "class": "over",
+  "alt": "over",
+  "percentage": 58,
+  "monitors": [{ "provider": "claude", "text": "C 92%", "class": "below", "pace": "below", "percentage": 92 }]
+}
+```
+
+Subscription colors compare **used %** to a **linear burn** across each quota window (elapsed / duration). Within ±5 percentage points is `at`; slower than that is `below` (under budget); faster is `over`. `class` / `alt` is the worst state among the (filtered) monitors: `below`, `at`, `over`, `ok` (credits, or no window), `auth` (needs Connect), `error`, or `empty`. `percentage` is the tightest remaining quota among healthy monitors. Compact tokens use `C` / `X` / `AI` / `OR` / `DS` / `AN`; `text` is Pango-colored per monitor (set Waybar `markup` to `pango`).
+
+### Waybar module
+
+aimon must be reachable from the bar host (typically `http://127.0.0.1:8080`), and `curl` must be on `PATH`. Connect OAuth providers in the dashboard first or the bar will show `C ?` / `AI ?`. Poll no faster than `poll_interval` (default 60s).
+
+In `~/.config/waybar/config` (or `config.jsonc`), add `"custom/aimon"` to a `modules-*` list and:
+
+```jsonc
+"custom/aimon": {
+    "exec": "curl -fsS --max-time 2 http://127.0.0.1:8080/api/waybar?kind=subscription || echo '{\"text\":\"aimon !\",\"tooltip\":\"aimon unreachable\",\"class\":\"error\",\"alt\":\"error\"}'",
+    "return-type": "json",
+    "markup": "pango",
+    "interval": 60,
+    "tooltip": true,
+    "on-click": "xdg-open http://127.0.0.1:8080"
+}
+```
+
+One gadget per provider: `?provider=claude`, `?provider=xai`, `?provider=openai`. In `~/.config/waybar/style.css`:
+
+```css
+#custom-aimon.below { color: #7dffb3; }
+#custom-aimon.at { color: #ffcc66; }
+#custom-aimon.over { color: #ff5555; }
+#custom-aimon.warn,
+#custom-aimon.auth { color: #ffcc66; }
+#custom-aimon.critical,
+#custom-aimon.error { color: #ff5555; }
+#custom-aimon.empty { color: #888; }
+```
+
+Then `killall -SIGUSR2 waybar` (or restart Waybar) so it reloads the config.
 
 ---
 

@@ -40,7 +40,10 @@ func TestParseOpenAIUsage(t *testing.T) {
 	if !st.OK || st.Provider != "openai" || st.Label != "My OpenAI" || st.Kind != model.KindSubscription || st.Unit != "%" || !strings.Contains(st.Plan, "plus") {
 		t.Fatalf("unexpected status: %+v", st)
 	}
-	want := []model.Span{{Name: "5h", Used: 0.8, ResetAt: 1800003600}, {Name: "1w", Used: 32.5, ResetAt: 1800600000}}
+	want := []model.Span{
+		{Name: "5h", Used: 0.8, ResetAt: 1800003600, Duration: 18000},
+		{Name: "1w", Used: 32.5, ResetAt: 1800600000, Duration: 604800},
+	}
 	if !reflect.DeepEqual(st.Spans, want) {
 		t.Fatalf("spans = %+v, want %+v", st.Spans, want)
 	}
@@ -56,14 +59,14 @@ func TestParseOpenAIUsageWindows(t *testing.T) {
 		raw  string
 		want []model.Span
 	}{
-		{"zero used", `{"rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_after_seconds":60},"secondary_window":null}}`, []model.Span{{Name: "5h", Used: 0, ResetAt: now.Unix() + 60}}},
-		{"secondary only", `{"rate_limit":{"primary_window":null,"secondary_window":{"used_percent":90,"limit_window_seconds":86400}}}`, []model.Span{{Name: "1d", Used: 90}}},
+		{"zero used", `{"rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_after_seconds":60},"secondary_window":null}}`, []model.Span{{Name: "5h", Used: 0, ResetAt: now.Unix() + 60, Duration: 18000}}},
+		{"secondary only", `{"rate_limit":{"primary_window":null,"secondary_window":{"used_percent":90,"limit_window_seconds":86400}}}`, []model.Span{{Name: "1d", Used: 90, Duration: 86400}}},
 		{"clamp and missing duration", `{"rate_limit":{"primary_window":{"used_percent":-2},"secondary_window":{"used_percent":120}}}`, []model.Span{{Name: "primary", Used: 0}, {Name: "secondary", Used: 100}}},
-		{"absolute reset wins", `{"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":900,"reset_at":1800000300,"reset_after_seconds":60}}}`, []model.Span{{Name: "15m", Used: 12, ResetAt: now.Unix() + 300}}},
-		{"reset now", `{"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":1800,"reset_after_seconds":0}}}`, []model.Span{{Name: "30m", Used: 12, ResetAt: now.Unix()}}},
+		{"absolute reset wins", `{"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":900,"reset_at":1800000300,"reset_after_seconds":60}}}`, []model.Span{{Name: "15m", Used: 12, ResetAt: now.Unix() + 300, Duration: 900}}},
+		{"reset now", `{"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":1800,"reset_after_seconds":0}}}`, []model.Span{{Name: "30m", Used: 12, ResetAt: now.Unix(), Duration: 1800}}},
 		{"invalid reset", `{"rate_limit":{"primary_window":{"used_percent":12,"reset_at":-1,"reset_after_seconds":-1}}}`, []model.Span{{Name: "primary", Used: 12}}},
-		{"missing usage skipped", `{"rate_limit":{"primary_window":{"limit_window_seconds":18000},"secondary_window":{"used_percent":0,"limit_window_seconds":604800}}}`, []model.Span{{Name: "1w", Used: 0}}},
-		{"additional and review", `{"code_review_rate_limit":{"primary_window":{"used_percent":8,"limit_window_seconds":604800}},"additional_rate_limits":[{"limit_name":"Spark","rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":18000}}},{"metered_feature":"other","rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":60}}}]}`, []model.Span{{Name: "1w review", Used: 8}, {Name: "5h Spark", Used: 42}, {Name: "1m other", Used: 5}}},
+		{"missing usage skipped", `{"rate_limit":{"primary_window":{"limit_window_seconds":18000},"secondary_window":{"used_percent":0,"limit_window_seconds":604800}}}`, []model.Span{{Name: "1w", Used: 0, Duration: 604800}}},
+		{"additional and review", `{"code_review_rate_limit":{"primary_window":{"used_percent":8,"limit_window_seconds":604800}},"additional_rate_limits":[{"limit_name":"Spark","rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":18000}}},{"metered_feature":"other","rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":60}}}]}`, []model.Span{{Name: "1w review", Used: 8, Duration: 604800}, {Name: "5h Spark", Used: 42, Duration: 18000}, {Name: "1m other", Used: 5, Duration: 60}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st, err := parseOpenAIUsage("OpenAI", []byte(tc.raw), now)

@@ -57,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/waybar", s.handleWaybar)
 	mux.HandleFunc("GET /api/history", s.handleHistory)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 	mux.HandleFunc("GET /oauth/start", s.handleOAuthStart)

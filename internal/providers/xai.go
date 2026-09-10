@@ -310,7 +310,7 @@ func statusFromCreditsConfig(st model.Status, env grokCreditsEnvelope) (model.St
 		resetUnix = t.Unix()
 		st.ResetAt = &resetUnix
 	}
-	st.Spans = []model.Span{{Name: spanName, Used: pct, ResetAt: resetUnix}}
+	st.Spans = []model.Span{{Name: spanName, Used: pct, ResetAt: resetUnix, Duration: grokDuration(start, resetUnix, spanName)}}
 
 	st.Extra["prepaid_cents"] = float64(cfg.PrepaidBalance.Val)
 	st.Extra["on_demand_used"] = float64(cfg.OnDemandUsed.Val)
@@ -369,7 +369,7 @@ func statusFromLegacyBilling(st model.Status, env grokCreditsEnvelope) (model.St
 		st.Balance = fptr(100 - pct)
 		st.Extra["monthly_limit"] = limit
 		st.Extra["total_used"] = used
-		st.Spans = []model.Span{{Name: "1mo", Used: pct, ResetAt: resetUnix}}
+		st.Spans = []model.Span{{Name: "1mo", Used: pct, ResetAt: resetUnix, Duration: grokDuration(env.BillingCycle.BillingPeriodStart, resetUnix, "1mo")}}
 		return st, nil
 	}
 	// No limit and no weekly percent: connected but no meter.
@@ -388,6 +388,13 @@ func grokWindow(periodType string) (span, window string) {
 	default:
 		return "1w", "weekly"
 	}
+}
+
+func grokDuration(start string, resetUnix int64, spanName string) int64 {
+	if t, ok := parseGrokTime(start); ok && resetUnix > t.Unix() {
+		return resetUnix - t.Unix()
+	}
+	return model.ParseWindowDuration(spanName)
 }
 
 func parseGrokTime(s string) (time.Time, bool) {
