@@ -28,6 +28,32 @@ func TestParseWindowDuration(t *testing.T) {
 	}
 }
 
+func TestSpanWeekly(t *testing.T) {
+	week := int64(7 * 24 * 3600)
+	cases := []struct {
+		sp   Span
+		want bool
+	}{
+		{Span{Name: "1w"}, true},
+		{Span{Name: "1w opus"}, true},
+		{Span{Name: "1w review"}, true},
+		{Span{Name: "5h"}, false},
+		{Span{Name: "5h Spark"}, false},
+		{Span{Name: "1d"}, false},
+		{Span{Name: "1mo"}, false},
+		{Span{Name: "extra_usage"}, false},
+		{Span{Name: "nimbus_quill"}, false},
+		{Span{Duration: week}, true},
+		{Span{Name: "primary", Duration: week}, true},
+		{Span{Name: "5h", Duration: 5 * 3600}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.sp.Weekly(); got != tc.want {
+			t.Fatalf("%+v Weekly() = %v, want %v", tc.sp, got, tc.want)
+		}
+	}
+}
+
 func TestSpanPace(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	// 5h window, 2.5h left → linear used = 50%.

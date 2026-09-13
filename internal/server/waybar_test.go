@@ -54,8 +54,11 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 		},
 	}
 	got := formatWaybar(list, now)
-	if !strings.Contains(got.Text, "C 92%") || !strings.Contains(got.Text, "X 58%") || !strings.Contains(got.Text, "AI ?") {
-		t.Fatalf("text = %q", got.Text)
+	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "X 58%") || !strings.Contains(got.Text, "AI ?") {
+		t.Fatalf("text = %q (weekly remaining, not 5h)", got.Text)
+	}
+	if strings.Contains(got.Text, "C 92%") {
+		t.Fatalf("text still uses 5h remaining: %q", got.Text)
 	}
 	if !strings.Contains(got.Text, `color="#7dffb3"`) || !strings.Contains(got.Text, `color="#ffcc66"`) {
 		t.Fatalf("text should pango-color by pace: %q", got.Text)
@@ -64,10 +67,10 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 		t.Fatalf("class = %q (want auth: unconnected monitor is worst)", got.Class)
 	}
 	if got.Percentage == nil || *got.Percentage != 58 {
-		t.Fatalf("percentage = %v (tightest healthy remaining)", got.Percentage)
+		t.Fatalf("percentage = %v (tightest healthy weekly remaining)", got.Percentage)
 	}
-	if !strings.Contains(got.Tooltip, "92%/5h  resets 4h32m  at · linear 91% left") {
-		t.Fatalf("tooltip missing 5h span: %q", got.Tooltip)
+	if strings.Contains(got.Tooltip, "5h") {
+		t.Fatalf("tooltip must not include 5h session window: %q", got.Tooltip)
 	}
 	if !strings.Contains(got.Tooltip, "80%/1w  resets 4d2h  below · linear 58% left") {
 		t.Fatalf("tooltip missing 1w span: %q", got.Tooltip)
@@ -75,19 +78,25 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 	if !strings.Contains(got.Tooltip, "not connected") {
 		t.Fatalf("tooltip missing auth: %q", got.Tooltip)
 	}
-	if len(got.Monitors) != 3 || got.Monitors[0].Class != model.PaceAt || got.Monitors[1].Text != "X 58%" || got.Monitors[1].Class != model.PaceBelow || got.Monitors[2].Class != waybarClassAuth {
+	if len(got.Monitors) != 3 || got.Monitors[0].Class != model.PaceBelow || got.Monitors[0].Text != "C 80%" || got.Monitors[1].Text != "X 58%" || got.Monitors[1].Class != model.PaceBelow || got.Monitors[2].Class != waybarClassAuth {
 		t.Fatalf("monitors = %+v", got.Monitors)
+	}
+	if len(got.Monitors[0].Spans) != 1 || got.Monitors[0].Spans[0].Name != "1w" {
+		t.Fatalf("claude waybar spans = %+v, want weekly only", got.Monitors[0].Spans)
 	}
 }
 
 func TestFormatWaybarPace(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
-	reset := now.Add(2*time.Hour + 30*time.Minute).Unix() // 5h window half elapsed → linear 50%
+	reset := now.Add(3*24*time.Hour + 12*time.Hour).Unix() // 1w window half elapsed → linear 50%
 	mk := func(used float64) model.Status {
 		return model.Status{
 			Provider: "openai", Label: "Codex", Kind: model.KindSubscription, OK: true,
 			Used: fptr(used), Total: fptr(100), Balance: fptr(100 - used),
-			Spans: []model.Span{{Name: "5h", Used: used, ResetAt: reset, Duration: 5 * 3600}},
+			Spans: []model.Span{
+				{Name: "5h", Used: 99, ResetAt: now.Add(time.Hour).Unix(), Duration: 5 * 3600},
+				{Name: "1w", Used: used, ResetAt: reset, Duration: 7 * 24 * 3600},
+			},
 		}
 	}
 	cases := []struct {
@@ -107,6 +116,27 @@ func TestFormatWaybarPace(t *testing.T) {
 		if got.Monitors[0].Pace != tc.class {
 			t.Fatalf("used %.0f: pace = %q", tc.used, got.Monitors[0].Pace)
 		}
+	}
+}
+
+func TestFormatWaybarSessionOnly(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	got := formatWaybar([]model.Status{{
+		Provider: "openai", Label: "Codex", Kind: model.KindSubscription, OK: true,
+		Used: fptr(40), Total: fptr(100), Balance: fptr(60),
+		Spans: []model.Span{{Name: "5h", Used: 40, ResetAt: now.Add(2 * time.Hour).Unix(), Duration: 5 * 3600}},
+	}}, now)
+	if !strings.Contains(got.Text, "AI ok") {
+		t.Fatalf("session-only should not show a 5h percent: %q", got.Text)
+	}
+	if got.Percentage != nil {
+		t.Fatalf("session-only percentage = %v, want nil", *got.Percentage)
+	}
+	if got.Class != waybarClassOK {
+		t.Fatalf("session-only class = %q, want ok (no weekly pace)", got.Class)
+	}
+	if strings.Contains(got.Tooltip, "5h") {
+		t.Fatalf("tooltip = %q", got.Tooltip)
 	}
 }
 

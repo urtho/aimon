@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/algonode/aimon/internal/config"
@@ -161,14 +162,17 @@ func (c *claude) Fetch(ctx context.Context) (model.Status, error) {
 }
 
 // applySpans fills a Status's Spans plus the aggregate fields, which track the
-// tightest window (drives the summary and DB history).
+// tightest quota window (drives the summary, Waybar %, and DB history).
+// Spans with no window length (extra credits, unnamed meters) stay as rows
+// but do not drive Used/Balance.
 func applySpans(st *model.Status, spans []model.Span) {
 	st.Spans = spans
-	worst := spans[0]
-	for _, sp := range spans {
-		if sp.Used > worst.Used {
-			worst = sp
-		}
+	if len(spans) == 0 {
+		return
+	}
+	worst, ok := tightestSpan(spans, true)
+	if !ok {
+		worst, _ = tightestSpan(spans, false)
 	}
 	st.Used = fptr(worst.Used)
 	st.Total = fptr(100)
@@ -177,6 +181,20 @@ func applySpans(st *model.Status, spans []model.Span) {
 		r := worst.ResetAt
 		st.ResetAt = &r
 	}
+}
+
+func tightestSpan(spans []model.Span, windowedOnly bool) (model.Span, bool) {
+	var worst model.Span
+	found := false
+	for _, sp := range spans {
+		if windowedOnly && sp.WindowSeconds() <= 0 {
+			continue
+		}
+		if !found || sp.Used > worst.Used {
+			worst, found = sp, true
+		}
+	}
+	return worst, found
 }
 
 // applyLastSpans reuses the last good windows when they're still fresh,
@@ -224,6 +242,9 @@ func parseClaudeUsage(m map[string]any) []model.Span {
 	scan = func(name string, v any) {
 		switch t := v.(type) {
 		case map[string]any:
+			if skipClaudeUsageObject(name, t) {
+				return
+			}
 			if u, uok := toFloat(t["utilization"]); uok {
 				label, order, dur := name, 100, int64(0) // unknown windows: raw key, listed last
 				if def, known := claudeWindowLabels[name]; known {
@@ -254,6 +275,26 @@ func parseClaudeUsage(m map[string]any) []model.Span {
 	}
 	scan("", m)
 
+	// When the payload has real plan windows, drop leftover meters that are
+	// not a known window and have no duration/reset (nimbus_quill, etc.).
+	hasKnown := false
+	for _, e := range entries {
+		if e.order < 100 {
+			hasKnown = true
+			break
+		}
+	}
+	if hasKnown {
+		n := 0
+		for _, e := range entries {
+			if e.order < 100 || e.span.Duration > 0 || e.span.ResetAt > 0 {
+				entries[n] = e
+				n++
+			}
+		}
+		entries = entries[:n]
+	}
+
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].order != entries[j].order {
 			return entries[i].order < entries[j].order
@@ -265,6 +306,31 @@ func parseClaudeUsage(m map[string]any) []model.Span {
 		spans[i] = e.span
 	}
 	return spans
+}
+
+// skipClaudeUsageObject drops extra-credit / spend objects. They carry a
+// `utilization` percentage (e.g. extra_usage 76% of purchased credits) that is
+// not plan quota; treating them as spans made Waybar show 24% while 5h/1w
+// were 100% remaining.
+func skipClaudeUsageObject(name string, t map[string]any) bool {
+	key := name
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		key = name[i+1:]
+	}
+	switch key {
+	case "extra_usage", "spend":
+		return true
+	}
+	if _, ok := t["used_credits"]; ok {
+		return true
+	}
+	if _, ok := t["credits_ever_enabled"]; ok {
+		return true
+	}
+	if _, ok := t["monthly_limit"]; ok {
+		return true
+	}
+	return false
 }
 
 func clampPct(f float64) float64 {

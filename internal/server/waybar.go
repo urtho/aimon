@@ -82,7 +82,9 @@ var waybarIcons = map[string]string{
 }
 
 // GET /api/waybar — Waybar custom-module JSON for the latest snapshots.
-// Optional filters: provider, label, kind (comma-separated, case-insensitive).
+// Subscription compact % / pace / tooltip use weekly quota windows only
+// (5h session windows stay on the dashboard). Optional filters: provider,
+// label, kind (comma-separated, case-insensitive).
 func (s *Server) handleWaybar(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	list := filterStatuses(s.poller.Latest(), q.Get("provider"), q.Get("label"), q.Get("kind"))
@@ -151,11 +153,12 @@ func formatWaybar(list []model.Status, now time.Time) waybarPayload {
 	class := "" // rank 0; first real class always wins
 	var minPct *int
 	for _, st := range list {
+		weeks := weeklySpans(st.Spans)
 		pct := remainingPct(st)
 		cls := monitorClass(st, now)
 		text := compactText(st, pct)
 		detail := monitorDetail(st, now)
-		pace, _ := st.WorstPace(now)
+		pace, _ := weeklyPace(st, now)
 		wm := waybarMonitor{
 			Provider:   st.Provider,
 			Label:      st.Label,
@@ -169,7 +172,7 @@ func formatWaybar(list []model.Status, now time.Time) waybarPayload {
 			Pace:       pace,
 			Percentage: pct,
 			Plan:       st.Plan,
-			Spans:      st.Spans,
+			Spans:      weeks,
 			UpdatedAt:  st.UpdatedAt,
 		}
 		out.Monitors = append(out.Monitors, wm)
@@ -194,8 +197,26 @@ func formatWaybar(list []model.Status, now time.Time) waybarPayload {
 	return out
 }
 
+func weeklySpans(spans []model.Span) []model.Span {
+	out := make([]model.Span, 0, len(spans))
+	for _, sp := range spans {
+		if sp.Weekly() {
+			out = append(out, sp)
+		}
+	}
+	return out
+}
+
+// remainingPct is remaining weekly quota. Session windows (5h) are ignored;
+// a monitor with only those does not get a percentage on the bar.
 func remainingPct(s model.Status) *int {
 	if !s.OK {
+		return nil
+	}
+	if left, ok := tightestRemaining(weeklySpans(s.Spans)); ok {
+		return clampPctPtr(int(math.Round(left)))
+	}
+	if len(s.Spans) > 0 {
 		return nil
 	}
 	if r, ok := s.Remaining(); ok {
@@ -206,6 +227,19 @@ func remainingPct(s model.Status) *int {
 		return clampPctPtr(int(math.Round(*s.Balance)))
 	}
 	return nil
+}
+
+func tightestRemaining(spans []model.Span) (float64, bool) {
+	if len(spans) == 0 {
+		return 0, false
+	}
+	minLeft := 100 - spans[0].Used
+	for _, sp := range spans[1:] {
+		if left := 100 - sp.Used; left < minLeft {
+			minLeft = left
+		}
+	}
+	return minLeft, true
 }
 
 func clampPctPtr(v int) *int {
@@ -225,10 +259,16 @@ func monitorClass(s model.Status, now time.Time) string {
 	if !s.OK {
 		return waybarClassError
 	}
-	if p, ok := s.WorstPace(now); ok {
+	if p, ok := weeklyPace(s, now); ok {
 		return p
 	}
 	return waybarClassOK
+}
+
+func weeklyPace(s model.Status, now time.Time) (string, bool) {
+	tmp := s
+	tmp.Spans = weeklySpans(s.Spans)
+	return tmp.WorstPace(now)
 }
 
 func colorize(text, class string) string {
@@ -286,10 +326,10 @@ func monitorDetail(s model.Status, now time.Time) string {
 		}
 		return head + "\n  " + msg
 	}
-	if len(s.Spans) > 0 {
+	if weeks := weeklySpans(s.Spans); len(weeks) > 0 {
 		var b strings.Builder
 		b.WriteString(head)
-		for _, sp := range s.Spans {
+		for _, sp := range weeks {
 			left := max(0, int(math.Round(100-sp.Used)))
 			fmt.Fprintf(&b, "\n  %d%%/%s", left, sp.Name)
 			if sp.ResetAt > 0 {

@@ -62,6 +62,18 @@ func (sp Span) WindowSeconds() int64 {
 	return ParseWindowDuration(sp.Name)
 }
 
+const weekSeconds int64 = 7 * 24 * 3600
+
+// Weekly reports whether this span is a weekly quota (7-day window, or a
+// name like "1w" / "1w opus"). Session windows (5h) are not weekly.
+func (sp Span) Weekly() bool {
+	if dur := sp.WindowSeconds(); dur >= weekSeconds && dur%weekSeconds == 0 {
+		return true
+	}
+	m := windowNameRe.FindStringSubmatch(sp.Name)
+	return m != nil && strings.EqualFold(m[2], "w")
+}
+
 // LinearUsed is the percent that would be consumed if spend were linear
 // from (ResetAt − window) to ResetAt. ok is false when the window is unknown.
 func (sp Span) LinearUsed(now time.Time) (float64, bool) {
