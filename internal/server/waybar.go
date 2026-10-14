@@ -82,14 +82,37 @@ var waybarIcons = map[string]string{
 }
 
 // GET /api/waybar — Waybar custom-module JSON for the latest snapshots.
-// Subscription compact % / pace / tooltip use weekly quota windows only
-// (5h session windows stay on the dashboard). Optional filters: provider,
+// Subscription compact % / pace / tooltip use weekly quota windows; a monitor
+// with no weekly window (e.g. a Claude Team seat with only a 5h session cap)
+// falls back to its session windows. Optional filters: provider,
 // label, kind (comma-separated, case-insensitive).
 func (s *Server) handleWaybar(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	list := filterStatuses(s.poller.Latest(), q.Get("provider"), q.Get("label"), q.Get("kind"))
+	all := s.poller.Latest()
+	// Icons are numbered over the unfiltered list so a second Claude seat stays
+	// "C2" even when the gadget filters down to just that label.
+	icons := monitorIcons(all)
+	list := filterStatuses(all, q.Get("provider"), q.Get("label"), q.Get("kind"))
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, formatWaybar(list, time.Now()))
+	writeJSON(w, http.StatusOK, formatWaybar(list, icons, time.Now()))
+}
+
+// monitorIcons maps each monitor ID to its compact bar token. The first
+// monitor of a provider (config order) gets the plain icon ("C"); later ones
+// are numbered ("C2", "C3") so multiple seats/logins stay distinguishable.
+func monitorIcons(list []model.Status) map[string]string {
+	out := make(map[string]string, len(list))
+	seen := make(map[string]int)
+	for _, st := range list {
+		prov := strings.ToLower(st.Provider)
+		seen[prov]++
+		icon := providerIcon(st.Provider)
+		if n := seen[prov]; n > 1 {
+			icon += strconv.Itoa(n)
+		}
+		out[st.ID()] = icon
+	}
+	return out
 }
 
 func filterStatuses(list []model.Status, provider, label, kind string) []model.Status {
@@ -136,7 +159,12 @@ func csvSet(s string) map[string]struct{} {
 	return out
 }
 
-func formatWaybar(list []model.Status, now time.Time) waybarPayload {
+// formatWaybar renders list; icons (from monitorIcons) may be nil, in which
+// case tokens are numbered over list itself.
+func formatWaybar(list []model.Status, icons map[string]string, now time.Time) waybarPayload {
+	if icons == nil {
+		icons = monitorIcons(list)
+	}
 	out := waybarPayload{
 		Monitors: make([]waybarMonitor, 0, len(list)),
 	}
@@ -153,12 +181,12 @@ func formatWaybar(list []model.Status, now time.Time) waybarPayload {
 	class := "" // rank 0; first real class always wins
 	var minPct *int
 	for _, st := range list {
-		weeks := weeklySpans(st.Spans)
+		bars := barSpans(st.Spans)
 		pct := remainingPct(st)
 		cls := monitorClass(st, now)
-		text := compactText(st, pct)
+		text := compactText(st, icons[st.ID()], pct)
 		detail := monitorDetail(st, now)
-		pace, _ := weeklyPace(st, now)
+		pace, _ := barPace(st, now)
 		wm := waybarMonitor{
 			Provider:   st.Provider,
 			Label:      st.Label,
@@ -172,7 +200,7 @@ func formatWaybar(list []model.Status, now time.Time) waybarPayload {
 			Pace:       pace,
 			Percentage: pct,
 			Plan:       st.Plan,
-			Spans:      weeks,
+			Spans:      bars,
 			UpdatedAt:  st.UpdatedAt,
 		}
 		out.Monitors = append(out.Monitors, wm)
@@ -197,23 +225,32 @@ func formatWaybar(list []model.Status, now time.Time) waybarPayload {
 	return out
 }
 
-func weeklySpans(spans []model.Span) []model.Span {
-	out := make([]model.Span, 0, len(spans))
+// barSpans picks the windows that drive the bar: weekly windows when the
+// monitor has any, otherwise every window with a known length (session caps).
+// Unwindowed meters (extra credits) never drive it.
+func barSpans(spans []model.Span) []model.Span {
+	weekly := make([]model.Span, 0, len(spans))
+	windowed := make([]model.Span, 0, len(spans))
 	for _, sp := range spans {
 		if sp.Weekly() {
-			out = append(out, sp)
+			weekly = append(weekly, sp)
+		}
+		if sp.WindowSeconds() > 0 {
+			windowed = append(windowed, sp)
 		}
 	}
-	return out
+	if len(weekly) > 0 {
+		return weekly
+	}
+	return windowed
 }
 
-// remainingPct is remaining weekly quota. Session windows (5h) are ignored;
-// a monitor with only those does not get a percentage on the bar.
+// remainingPct is remaining quota in the bar windows (see barSpans).
 func remainingPct(s model.Status) *int {
 	if !s.OK {
 		return nil
 	}
-	if left, ok := tightestRemaining(weeklySpans(s.Spans)); ok {
+	if left, ok := tightestRemaining(barSpans(s.Spans)); ok {
 		return clampPctPtr(int(math.Round(left)))
 	}
 	if len(s.Spans) > 0 {
@@ -259,15 +296,15 @@ func monitorClass(s model.Status, now time.Time) string {
 	if !s.OK {
 		return waybarClassError
 	}
-	if p, ok := weeklyPace(s, now); ok {
+	if p, ok := barPace(s, now); ok {
 		return p
 	}
 	return waybarClassOK
 }
 
-func weeklyPace(s model.Status, now time.Time) (string, bool) {
+func barPace(s model.Status, now time.Time) (string, bool) {
 	tmp := s
-	tmp.Spans = weeklySpans(s.Spans)
+	tmp.Spans = barSpans(s.Spans)
 	return tmp.WorstPace(now)
 }
 
@@ -279,8 +316,10 @@ func colorize(text, class string) string {
 	return fmt.Sprintf(`<span color="%s">%s</span>`, color, html.EscapeString(text))
 }
 
-func compactText(s model.Status, pct *int) string {
-	icon := providerIcon(s.Provider)
+func compactText(s model.Status, icon string, pct *int) string {
+	if icon == "" {
+		icon = providerIcon(s.Provider)
+	}
 	switch {
 	case s.NeedsAuth:
 		return icon + " ?"
@@ -326,10 +365,10 @@ func monitorDetail(s model.Status, now time.Time) string {
 		}
 		return head + "\n  " + msg
 	}
-	if weeks := weeklySpans(s.Spans); len(weeks) > 0 {
+	if bars := barSpans(s.Spans); len(bars) > 0 {
 		var b strings.Builder
 		b.WriteString(head)
-		for _, sp := range weeks {
+		for _, sp := range bars {
 			left := max(0, int(math.Round(100-sp.Used)))
 			fmt.Fprintf(&b, "\n  %d%%/%s", left, sp.Name)
 			if sp.ResetAt > 0 {

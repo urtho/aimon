@@ -25,6 +25,14 @@ monitors:
     label: "Claude (Max)"
     oauth: true
 
+  # Second Claude subscription (e.g. a Team seat on a different login). Each
+  # label stores its own OAuth token. When connecting, authorize in a private
+  # window (or log claude.ai out first) so the consent page uses the other
+  # account. Waybar shows it as "C2" (later monitors of a provider get numbered).
+  - provider: claude
+    label: "Claude (Team)"
+    oauth: true
+
   # Grok subscription: click "Connect" in the UI to authorize via OAuth (PKCE) —
   # aimon reads the shared weekly usage pool from the same endpoint Grok Build's
   # /usage uses. Alternatives: point token_file at ~/.grok/auth.json (kept

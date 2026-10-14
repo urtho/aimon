@@ -21,7 +21,7 @@ import (
 func fptr(f float64) *float64 { return &f }
 
 func TestFormatWaybarEmpty(t *testing.T) {
-	got := formatWaybar(nil, time.Unix(1_700_000_000, 0))
+	got := formatWaybar(nil, nil, time.Unix(1_700_000_000, 0))
 	if got.Text != "aimon" || got.Class != waybarClassEmpty || got.Alt != waybarClassEmpty || got.Tooltip != "no monitors" {
 		t.Fatalf("empty: %+v", got)
 	}
@@ -53,7 +53,7 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 			OK: false, NeedsAuth: true, Error: "not connected — click Connect",
 		},
 	}
-	got := formatWaybar(list, now)
+	got := formatWaybar(list, nil, now)
 	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "X 58%") || !strings.Contains(got.Text, "AI ?") {
 		t.Fatalf("text = %q (weekly remaining, not 5h)", got.Text)
 	}
@@ -109,7 +109,7 @@ func TestFormatWaybarPace(t *testing.T) {
 		{56, model.PaceOver},
 	}
 	for _, tc := range cases {
-		got := formatWaybar([]model.Status{mk(tc.used)}, now)
+		got := formatWaybar([]model.Status{mk(tc.used)}, nil, now)
 		if got.Class != tc.class {
 			t.Fatalf("used %.0f: class = %q, want %q", tc.used, got.Class, tc.class)
 		}
@@ -119,24 +119,41 @@ func TestFormatWaybarPace(t *testing.T) {
 	}
 }
 
-func TestFormatWaybarSessionOnly(t *testing.T) {
+func TestFormatWaybarSessionOnlyFallback(t *testing.T) {
+	// No weekly window (Claude Team seat): the bar falls back to the session.
 	now := time.Unix(1_700_000_000, 0)
 	got := formatWaybar([]model.Status{{
-		Provider: "openai", Label: "Codex", Kind: model.KindSubscription, OK: true,
-		Used: fptr(40), Total: fptr(100), Balance: fptr(60),
-		Spans: []model.Span{{Name: "5h", Used: 40, ResetAt: now.Add(2 * time.Hour).Unix(), Duration: 5 * 3600}},
-	}}, now)
-	if !strings.Contains(got.Text, "AI ok") {
-		t.Fatalf("session-only should not show a 5h percent: %q", got.Text)
+		Provider: "claude", Label: "Claude (Team)", Kind: model.KindSubscription, OK: true,
+		Used: fptr(95), Total: fptr(100), Balance: fptr(5),
+		Spans: []model.Span{{Name: "5h", Used: 95, ResetAt: now.Add(1 * time.Hour).Unix(), Duration: 5 * 3600}},
+	}}, nil, now)
+	if !strings.Contains(got.Text, "C 5%") {
+		t.Fatalf("session-only should show 5h remaining: %q", got.Text)
 	}
-	if got.Percentage != nil {
-		t.Fatalf("session-only percentage = %v, want nil", *got.Percentage)
+	if got.Percentage == nil || *got.Percentage != 5 {
+		t.Fatalf("session-only percentage = %v, want 5", got.Percentage)
 	}
-	if got.Class != waybarClassOK {
-		t.Fatalf("session-only class = %q, want ok (no weekly pace)", got.Class)
+	if got.Class != model.PaceOver {
+		t.Fatalf("session-only class = %q, want over (95%% used, 80%% elapsed)", got.Class)
 	}
-	if strings.Contains(got.Tooltip, "5h") {
+	if !strings.Contains(got.Tooltip, "5%/5h  resets 1h") {
 		t.Fatalf("tooltip = %q", got.Tooltip)
+	}
+}
+
+func TestBarSpansPrefersWeekly(t *testing.T) {
+	spans := []model.Span{
+		{Name: "5h", Used: 90, Duration: 5 * 3600},
+		{Name: "1w", Used: 20, Duration: 7 * 24 * 3600},
+		{Name: "extra", Used: 99},
+	}
+	got := barSpans(spans)
+	if len(got) != 1 || got[0].Name != "1w" {
+		t.Fatalf("barSpans = %+v, want only 1w", got)
+	}
+	got = barSpans([]model.Span{spans[0], spans[2]})
+	if len(got) != 1 || got[0].Name != "5h" {
+		t.Fatalf("barSpans fallback = %+v, want only 5h", got)
 	}
 }
 
@@ -147,7 +164,7 @@ func TestFormatWaybarCreditsAndErrors(t *testing.T) {
 		{Provider: "deepseek", Label: "DeepSeek", Kind: model.KindCredit, OK: true, Balance: fptr(3.2), Unit: "CNY"},
 		{Provider: "anthropic", Label: "Anthropic API", Kind: model.KindCost, OK: true, Used: fptr(4.5), Unit: "USD", Window: "month-to-date"},
 		{Provider: "openai", Label: "Codex", Kind: model.KindSubscription, OK: false, Error: "usage HTTP 500"},
-	}, now)
+	}, nil, now)
 	if got.Text != `OR $12.40 · DS ¥3.20 · AN $4.50 · <span color="#ff5555">AI !</span>` {
 		t.Fatalf("text = %q", got.Text)
 	}
@@ -231,5 +248,30 @@ func TestHandleWaybar(t *testing.T) {
 	}
 	if got.Text != "aimon" || got.Class != waybarClassEmpty || got.Monitors == nil {
 		t.Fatalf("payload = %+v", got)
+	}
+}
+
+func TestMonitorIconsNumbersSecondSeat(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	all := []model.Status{
+		{Provider: "claude", Label: "Claude (Max)", Kind: model.KindSubscription, OK: true,
+			Spans: []model.Span{{Name: "1w", Used: 20}}},
+		{Provider: "xai", Label: "Grok", Kind: model.KindSubscription, OK: true},
+		{Provider: "claude", Label: "Claude (Team)", Kind: model.KindSubscription, OK: true,
+			Spans: []model.Span{{Name: "1w", Used: 70}}},
+	}
+	icons := monitorIcons(all)
+	if icons["claude/Claude (Max)"] != "C" || icons["claude/Claude (Team)"] != "C2" || icons["xai/Grok"] != "X" {
+		t.Fatalf("icons = %v", icons)
+	}
+	got := formatWaybar(all, nil, now)
+	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "C2 30%") {
+		t.Fatalf("text = %q", got.Text)
+	}
+	// Filtering to the team seat alone must keep its C2 token.
+	team := filterStatuses(all, "", "claude (team)", "")
+	got = formatWaybar(team, icons, now)
+	if !strings.Contains(got.Text, "C2 30%") || strings.Contains(got.Text, "C 80%") {
+		t.Fatalf("filtered text = %q", got.Text)
 	}
 }

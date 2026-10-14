@@ -168,6 +168,9 @@ The container user must have read access to the file.
 1. Click **Connect** on the card.
 2. Open the authorization page and approve.
    - **Claude** shows a `code#state` string — copy it.
+     For a second Claude account (e.g. a Team seat), open the authorization
+     page in a private window (or sign claude.ai out first) so you approve
+     with that account, not your default login.
    - **x.ai** redirects to a loopback URL (`127.0.0.1:56121/…`) that won't load;
      copy the **full URL from your browser's address bar** instead.
 3. Paste it back and **Connect**. Tokens are stored in SQLite and auto-refreshed.
@@ -213,7 +216,7 @@ config.yaml ─▶ providers ─▶ poller (every 60s, concurrent)
 ```json
 {
   "text": "C 92% · X 58% · AI 75%",
-  "tooltip": "Claude (Max)  Max\n  92%/5h  resets 4h32m\n…",
+  "tooltip": "Claude (Max)  Max\n  80%/1w  resets 4d2h  below · linear 58% left\n…",
   "class": "over",
   "alt": "over",
   "percentage": 58,
@@ -221,7 +224,7 @@ config.yaml ─▶ providers ─▶ poller (every 60s, concurrent)
 }
 ```
 
-Subscription colors compare **used %** to a **linear burn** across each quota window (elapsed / duration). Within ±5 percentage points is `at`; slower than that is `below` (under budget); faster is `over`. `class` / `alt` is the worst state among the (filtered) monitors: `below`, `at`, `over`, `ok` (credits, or no window), `auth` (needs Connect), `error`, or `empty`. `percentage` is the tightest remaining quota among healthy monitors. Compact tokens use `C` / `X` / `AI` / `OR` / `DS` / `AN`; `text` is Pango-colored per monitor (set Waybar `markup` to `pango`).
+Subscription bar values (%, color, tooltip) use **weekly** quota windows; a monitor with no weekly window (e.g. a Claude Team seat that only reports a 5h session cap) falls back to its session window. Subscription colors compare **used %** to a **linear burn** across each quota window (elapsed / duration). Within ±5 percentage points is `at`; slower than that is `below` (under budget); faster is `over`. `class` / `alt` is the worst state among the (filtered) monitors: `below`, `at`, `over`, `ok` (credits, or no window), `auth` (needs Connect), `error`, or `empty`. `percentage` is the tightest remaining quota among healthy monitors. Compact tokens use `C` / `X` / `AI` / `OR` / `DS` / `AN`; `text` is Pango-colored per monitor (set Waybar `markup` to `pango`). When a provider has several monitors (e.g. a personal Claude Max plus a Team seat), the first one in config order keeps the plain token and later ones are numbered — `C`, `C2`, … — even when the gadget filters down to one label (`?label=Claude%20(Team)`).
 
 ### Waybar module
 
