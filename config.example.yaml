@@ -33,6 +33,11 @@ monitors:
     label: "Claude (Team)"
     oauth: true
 
+  # Third Claude subscription (another Team seat). Shown as "C3" in Waybar.
+  - provider: claude
+    label: "Claude (Team 2)"
+    oauth: true
+
   # Grok subscription: click "Connect" in the UI to authorize via OAuth (PKCE) —
   # aimon reads the shared weekly usage pool from the same endpoint Grok Build's
   # /usage uses. Alternatives: point token_file at ~/.grok/auth.json (kept

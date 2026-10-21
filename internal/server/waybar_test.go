@@ -259,13 +259,16 @@ func TestMonitorIconsNumbersSecondSeat(t *testing.T) {
 		{Provider: "xai", Label: "Grok", Kind: model.KindSubscription, OK: true},
 		{Provider: "claude", Label: "Claude (Team)", Kind: model.KindSubscription, OK: true,
 			Spans: []model.Span{{Name: "1w", Used: 70}}},
+		{Provider: "claude", Label: "Claude (Team 2)", Kind: model.KindSubscription, OK: true,
+			Spans: []model.Span{{Name: "1w", Used: 50}}},
 	}
 	icons := monitorIcons(all)
-	if icons["claude/Claude (Max)"] != "C" || icons["claude/Claude (Team)"] != "C2" || icons["xai/Grok"] != "X" {
+	if icons["claude/Claude (Max)"] != "C" || icons["claude/Claude (Team)"] != "C2" ||
+		icons["claude/Claude (Team 2)"] != "C3" || icons["xai/Grok"] != "X" {
 		t.Fatalf("icons = %v", icons)
 	}
 	got := formatWaybar(all, nil, now)
-	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "C2 30%") {
+	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "C2 30%") || !strings.Contains(got.Text, "C3 50%") {
 		t.Fatalf("text = %q", got.Text)
 	}
 	// Filtering to the team seat alone must keep its C2 token.
