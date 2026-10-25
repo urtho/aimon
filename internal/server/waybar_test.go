@@ -278,3 +278,19 @@ func TestMonitorIconsNumbersSecondSeat(t *testing.T) {
 		t.Fatalf("filtered text = %q", got.Text)
 	}
 }
+
+func TestFormatWaybarFullQuotaIsGreen(t *testing.T) {
+	// Window just reset: linear expected ≈ 0, used 0 would score "at".
+	now := time.Unix(1_700_000_000, 0)
+	got := formatWaybar([]model.Status{{
+		Provider: "claude", Label: "Claude", Kind: model.KindSubscription, OK: true,
+		Used: fptr(0), Total: fptr(100), Balance: fptr(100),
+		Spans: []model.Span{{Name: "1w", Used: 0, ResetAt: now.Add(7*24*time.Hour - time.Minute).Unix(), Duration: 7 * 24 * 3600}},
+	}}, nil, now)
+	if got.Class != model.PaceBelow || got.Monitors[0].Pace != model.PaceBelow {
+		t.Fatalf("class = %q pace = %q, want below", got.Class, got.Monitors[0].Pace)
+	}
+	if !strings.Contains(got.Text, `color="#7dffb3"`) || !strings.Contains(got.Text, "C 100%") {
+		t.Fatalf("100%% should be green: %q", got.Text)
+	}
+}

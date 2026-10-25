@@ -187,6 +187,12 @@ func formatWaybar(list []model.Status, icons map[string]string, now time.Time) w
 		text := compactText(st, icons[st.ID()], pct)
 		detail := monitorDetail(st, now)
 		pace, _ := barPace(st, now)
+		if pct != nil && *pct == 100 && pace != "" {
+			// Untouched quota is never a pace concern, even at window start
+			// where linear expected is ~0 and 0 used scores "at".
+			pace = model.PaceBelow
+			cls = pace
+		}
 		wm := waybarMonitor{
 			Provider:   st.Provider,
 			Label:      st.Label,
