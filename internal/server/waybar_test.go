@@ -37,7 +37,8 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 			Provider: "claude", Label: "Claude (Max)", Kind: model.KindSubscription, OK: true,
 			Plan: "Max", Used: fptr(8), Total: fptr(100), Balance: fptr(92),
 			Spans: []model.Span{
-				{Name: "5h", Used: 8, ResetAt: now.Add(4*time.Hour + 32*time.Minute).Unix()},
+				// 3h of 5h elapsed → linear 60% used; 70 used is over.
+				{Name: "5h", Used: 70, ResetAt: now.Add(2 * time.Hour).Unix()},
 				{Name: "1w", Used: 20, ResetAt: now.Add(4*24*time.Hour + 2*time.Hour).Unix()},
 			},
 		},
@@ -54,23 +55,23 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 		},
 	}
 	got := formatWaybar(list, nil, now)
-	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "X 58%") || !strings.Contains(got.Text, "AI ?") {
-		t.Fatalf("text = %q (weekly remaining, not 5h)", got.Text)
+	if !strings.Contains(got.Text, "C 30%") || !strings.Contains(got.Text, "X 58%") || !strings.Contains(got.Text, "AI ?") {
+		t.Fatalf("text = %q (min of 5h / weekly remaining)", got.Text)
 	}
-	if strings.Contains(got.Text, "C 92%") {
-		t.Fatalf("text still uses 5h remaining: %q", got.Text)
+	if strings.Contains(got.Text, "C 80%") {
+		t.Fatalf("text uses weekly remaining though 5h is tighter: %q", got.Text)
 	}
-	if !strings.Contains(got.Text, `color="#7dffb3"`) || !strings.Contains(got.Text, `color="#ffcc66"`) {
+	if !strings.Contains(got.Text, `<span color="#ff5555">C 30%</span>`) || !strings.Contains(got.Text, `<span color="#7dffb3">X 58%</span>`) {
 		t.Fatalf("text should pango-color by pace: %q", got.Text)
 	}
 	if got.Class != waybarClassAuth || got.Alt != waybarClassAuth {
 		t.Fatalf("class = %q (want auth: unconnected monitor is worst)", got.Class)
 	}
-	if got.Percentage == nil || *got.Percentage != 58 {
-		t.Fatalf("percentage = %v (tightest healthy weekly remaining)", got.Percentage)
+	if got.Percentage == nil || *got.Percentage != 30 {
+		t.Fatalf("percentage = %v (tightest healthy remaining over 5h and weekly)", got.Percentage)
 	}
-	if strings.Contains(got.Tooltip, "5h") {
-		t.Fatalf("tooltip must not include 5h session window: %q", got.Tooltip)
+	if !strings.Contains(got.Tooltip, "30%/5h  resets 2h  over · linear 40% left") {
+		t.Fatalf("tooltip missing 5h span: %q", got.Tooltip)
 	}
 	if !strings.Contains(got.Tooltip, "80%/1w  resets 4d2h  below · linear 58% left") {
 		t.Fatalf("tooltip missing 1w span: %q", got.Tooltip)
@@ -78,49 +79,60 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 	if !strings.Contains(got.Tooltip, "not connected") {
 		t.Fatalf("tooltip missing auth: %q", got.Tooltip)
 	}
-	if len(got.Monitors) != 3 || got.Monitors[0].Class != model.PaceBelow || got.Monitors[0].Text != "C 80%" || got.Monitors[1].Text != "X 58%" || got.Monitors[1].Class != model.PaceBelow || got.Monitors[2].Class != waybarClassAuth {
+	if len(got.Monitors) != 3 || got.Monitors[0].Class != model.PaceOver || got.Monitors[0].Text != "C 30%" || got.Monitors[1].Text != "X 58%" || got.Monitors[1].Class != model.PaceBelow || got.Monitors[2].Class != waybarClassAuth {
 		t.Fatalf("monitors = %+v", got.Monitors)
 	}
-	if len(got.Monitors[0].Spans) != 1 || got.Monitors[0].Spans[0].Name != "1w" {
-		t.Fatalf("claude waybar spans = %+v, want weekly only", got.Monitors[0].Spans)
+	if p := got.Monitors[0].Percentage; p == nil || *p != 30 {
+		t.Fatalf("claude monitor percentage = %v, want 30", p)
+	}
+	if len(got.Monitors[0].Spans) != 2 || got.Monitors[0].Spans[0].Name != "5h" || got.Monitors[0].Spans[1].Name != "1w" {
+		t.Fatalf("claude waybar spans = %+v, want 5h and 1w", got.Monitors[0].Spans)
 	}
 }
 
 func TestFormatWaybarPace(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	reset := now.Add(3*24*time.Hour + 12*time.Hour).Unix() // 1w window half elapsed → linear 50%
-	mk := func(used float64) model.Status {
+	mk := func(session, used float64) model.Status {
 		return model.Status{
 			Provider: "openai", Label: "Codex", Kind: model.KindSubscription, OK: true,
 			Used: fptr(used), Total: fptr(100), Balance: fptr(100 - used),
 			Spans: []model.Span{
-				{Name: "5h", Used: 99, ResetAt: now.Add(time.Hour).Unix(), Duration: 5 * 3600},
+				// 1h of 5h elapsed → linear 20%.
+				{Name: "5h", Used: session, ResetAt: now.Add(4 * time.Hour).Unix(), Duration: 5 * 3600},
 				{Name: "1w", Used: used, ResetAt: reset, Duration: 7 * 24 * 3600},
 			},
 		}
 	}
 	cases := []struct {
-		used  float64
-		class string
+		session, used float64
+		class         string
+		pct           int
 	}{
-		{40, model.PaceBelow},
-		{50, model.PaceAt},
-		{55, model.PaceAt},
-		{56, model.PaceOver},
+		{10, 40, model.PaceBelow, 60},
+		{10, 50, model.PaceAt, 50},
+		{10, 55, model.PaceAt, 45},
+		{10, 56, model.PaceOver, 44},
+		{20, 40, model.PaceAt, 60},   // session on the line, week under
+		{30, 40, model.PaceOver, 60}, // session burning fast drives the color
+		{70, 40, model.PaceOver, 30}, // and the % when it has less left
 	}
 	for _, tc := range cases {
-		got := formatWaybar([]model.Status{mk(tc.used)}, nil, now)
+		got := formatWaybar([]model.Status{mk(tc.session, tc.used)}, nil, now)
 		if got.Class != tc.class {
-			t.Fatalf("used %.0f: class = %q, want %q", tc.used, got.Class, tc.class)
+			t.Fatalf("5h %.0f / 1w %.0f: class = %q, want %q", tc.session, tc.used, got.Class, tc.class)
 		}
 		if got.Monitors[0].Pace != tc.class {
-			t.Fatalf("used %.0f: pace = %q", tc.used, got.Monitors[0].Pace)
+			t.Fatalf("5h %.0f / 1w %.0f: pace = %q", tc.session, tc.used, got.Monitors[0].Pace)
+		}
+		if got.Percentage == nil || *got.Percentage != tc.pct {
+			t.Fatalf("5h %.0f / 1w %.0f: percentage = %v, want %d", tc.session, tc.used, got.Percentage, tc.pct)
 		}
 	}
 }
 
 func TestFormatWaybarSessionOnlyFallback(t *testing.T) {
-	// No weekly window (Claude Team seat): the bar falls back to the session.
+	// No weekly window (Claude Team seat): the session alone drives the bar.
 	now := time.Unix(1_700_000_000, 0)
 	got := formatWaybar([]model.Status{{
 		Provider: "claude", Label: "Claude (Team)", Kind: model.KindSubscription, OK: true,
@@ -141,19 +153,42 @@ func TestFormatWaybarSessionOnlyFallback(t *testing.T) {
 	}
 }
 
-func TestBarSpansPrefersWeekly(t *testing.T) {
+func TestBarSpansSessionAndWeekly(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
 	spans := []model.Span{
 		{Name: "5h", Used: 90, Duration: 5 * 3600},
 		{Name: "1w", Used: 20, Duration: 7 * 24 * 3600},
 		{Name: "extra", Used: 99},
 	}
-	got := barSpans(spans)
-	if len(got) != 1 || got[0].Name != "1w" {
-		t.Fatalf("barSpans = %+v, want only 1w", got)
+	got := barSpans(spans, now)
+	if len(got) != 2 || got[0].Name != "5h" || got[1].Name != "1w" {
+		t.Fatalf("barSpans = %+v, want 5h and 1w", got)
 	}
-	got = barSpans([]model.Span{spans[0], spans[2]})
+	got = barSpans([]model.Span{spans[0], spans[2]}, now)
 	if len(got) != 1 || got[0].Name != "5h" {
-		t.Fatalf("barSpans fallback = %+v, want only 5h", got)
+		t.Fatalf("barSpans session-only = %+v, want only 5h", got)
+	}
+}
+
+func TestFormatWaybarRolledOverSessionIsFresh(t *testing.T) {
+	// A stale snapshot (last-good spans, or the DB-seeded cache) still holds a
+	// 5h window that has since reset: it must not pin the bar at 2%.
+	now := time.Unix(1_700_000_000, 0)
+	got := formatWaybar([]model.Status{{
+		Provider: "claude", Label: "Claude (Team)", Kind: model.KindSubscription, OK: true,
+		Spans: []model.Span{
+			{Name: "5h", Used: 98, ResetAt: now.Add(-time.Minute).Unix(), Duration: 5 * 3600},
+			{Name: "1w", Used: 6, ResetAt: now.Add(6 * 24 * time.Hour).Unix(), Duration: 7 * 24 * 3600},
+		},
+	}}, nil, now)
+	if got.Percentage == nil || *got.Percentage != 94 || !strings.Contains(got.Text, "C 94%") {
+		t.Fatalf("percentage = %v text = %q, want 94 (week; 5h has reset)", got.Percentage, got.Text)
+	}
+	if got.Class == model.PaceOver {
+		t.Fatalf("class = %q: a reset session must not score over", got.Class)
+	}
+	if !strings.Contains(got.Tooltip, "100%/5h") || strings.Contains(got.Tooltip, "2%/5h") {
+		t.Fatalf("tooltip = %q", got.Tooltip)
 	}
 }
 

@@ -82,10 +82,10 @@ var waybarIcons = map[string]string{
 }
 
 // GET /api/waybar — Waybar custom-module JSON for the latest snapshots.
-// Subscription compact % / pace / tooltip use weekly quota windows; a monitor
-// with no weekly window (e.g. a Claude Team seat with only a 5h session cap)
-// falls back to its session windows. Optional filters: provider,
-// label, kind (comma-separated, case-insensitive).
+// Subscription compact % / pace / tooltip use every timed quota window (5h
+// session and weekly alike), so the % is whichever window has the least
+// left. Optional filters: provider, label, kind (comma-separated,
+// case-insensitive).
 func (s *Server) handleWaybar(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	all := s.poller.Latest()
@@ -181,8 +181,8 @@ func formatWaybar(list []model.Status, icons map[string]string, now time.Time) w
 	class := "" // rank 0; first real class always wins
 	var minPct *int
 	for _, st := range list {
-		bars := barSpans(st.Spans)
-		pct := remainingPct(st)
+		bars := barSpans(st.Spans, now)
+		pct := remainingPct(st, now)
 		cls := monitorClass(st, now)
 		text := compactText(st, icons[st.ID()], pct)
 		detail := monitorDetail(st, now)
@@ -231,32 +231,35 @@ func formatWaybar(list []model.Status, icons map[string]string, now time.Time) w
 	return out
 }
 
-// barSpans picks the windows that drive the bar: weekly windows when the
-// monitor has any, otherwise every window with a known length (session caps).
-// Unwindowed meters (extra credits) never drive it.
-func barSpans(spans []model.Span) []model.Span {
-	weekly := make([]model.Span, 0, len(spans))
-	windowed := make([]model.Span, 0, len(spans))
+// barSpans picks the windows that drive the bar: every window with a known
+// length (5h session and weekly caps alike), so the bar shows whichever runs
+// out first. Unwindowed meters (extra credits) never drive it.
+//
+// A window whose reset time has passed has rolled over since the snapshot
+// (last-good spans are reused for a while, and the cache is seeded from the
+// DB on restart): it counts as untouched, with the next reset unknown, so a
+// finished 5h session does not pin the bar near 0%.
+func barSpans(spans []model.Span, now time.Time) []model.Span {
+	out := make([]model.Span, 0, len(spans))
 	for _, sp := range spans {
-		if sp.Weekly() {
-			weekly = append(weekly, sp)
+		if sp.WindowSeconds() <= 0 {
+			continue
 		}
-		if sp.WindowSeconds() > 0 {
-			windowed = append(windowed, sp)
+		if sp.ResetAt > 0 && sp.ResetAt <= now.Unix() {
+			sp.Used, sp.ResetAt = 0, 0
 		}
+		out = append(out, sp)
 	}
-	if len(weekly) > 0 {
-		return weekly
-	}
-	return windowed
+	return out
 }
 
-// remainingPct is remaining quota in the bar windows (see barSpans).
-func remainingPct(s model.Status) *int {
+// remainingPct is remaining quota in the bar windows (see barSpans): the
+// minimum across the 5h and weekly windows.
+func remainingPct(s model.Status, now time.Time) *int {
 	if !s.OK {
 		return nil
 	}
-	if left, ok := tightestRemaining(barSpans(s.Spans)); ok {
+	if left, ok := tightestRemaining(barSpans(s.Spans, now)); ok {
 		return clampPctPtr(int(math.Round(left)))
 	}
 	if len(s.Spans) > 0 {
@@ -321,7 +324,7 @@ func monitorClass(s model.Status, now time.Time) string {
 
 func barPace(s model.Status, now time.Time) (string, bool) {
 	tmp := s
-	tmp.Spans = barSpans(s.Spans)
+	tmp.Spans = barSpans(s.Spans, now)
 	return tmp.WorstPace(now)
 }
 
@@ -387,7 +390,7 @@ func monitorDetail(s model.Status, now time.Time) string {
 		}
 		return head + "\n  " + msg
 	}
-	if bars := barSpans(s.Spans); len(bars) > 0 {
+	if bars := barSpans(s.Spans, now); len(bars) > 0 {
 		var b strings.Builder
 		b.WriteString(head)
 		for _, sp := range bars {
@@ -405,7 +408,7 @@ func monitorDetail(s model.Status, now time.Time) string {
 	}
 	switch s.Kind {
 	case model.KindSubscription:
-		if pct := remainingPct(s); pct != nil {
+		if pct := remainingPct(s, now); pct != nil {
 			return head + fmt.Sprintf("\n  %d%% quota left", *pct)
 		}
 		return head + "\n  connected"
