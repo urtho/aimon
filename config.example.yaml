@@ -38,6 +38,12 @@ monitors:
     label: "Claude (Team 2)"
     oauth: true
 
+  # Fourth Claude subscription. Shown as "C4" in Waybar. Connect it from the
+  # dashboard in a private window so the consent page uses that login.
+  - provider: claude
+    label: "Claude (Team 3)"
+    oauth: true
+
   # Grok subscription: click "Connect" in the UI to authorize via OAuth (PKCE) —
   # aimon reads the shared weekly usage pool from the same endpoint Grok Build's
   # /usage uses. Alternatives: point token_file at ~/.grok/auth.json (kept

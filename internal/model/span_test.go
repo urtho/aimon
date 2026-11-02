@@ -94,6 +94,18 @@ func TestSpanPace(t *testing.T) {
 	if _, _, ok := (Span{Name: "extra_usage", Used: 80}).Pace(now); ok {
 		t.Fatal("span without a window must not score a pace")
 	}
+
+	// Window just reset: linear expected ≈ 0, so 0 used would otherwise be "at".
+	fresh := Span{Name: "1w", Used: 0, ResetAt: now.Add(7*24*time.Hour - time.Minute).Unix(), Duration: 7 * 24 * 3600}
+	class, _, ok = fresh.Pace(now)
+	if !ok || class != PaceBelow {
+		t.Fatalf("full quota at window start: class=%q ok=%v, want below", class, ok)
+	}
+	fresh.Used = 0.4 // still rounds to 100% remaining
+	class, _, ok = fresh.Pace(now)
+	if !ok || class != PaceBelow {
+		t.Fatalf("0.4 used (100%% left) at window start: class=%q, want below", class)
+	}
 }
 
 func TestWorstPace(t *testing.T) {

@@ -187,11 +187,11 @@ func formatWaybar(list []model.Status, icons map[string]string, now time.Time) w
 		text := compactText(st, icons[st.ID()], pct)
 		detail := monitorDetail(st, now)
 		pace, _ := barPace(st, now)
-		if pct != nil && *pct == 100 && pace != "" {
-			// Untouched quota is never a pace concern, even at window start
-			// where linear expected is ~0 and 0 used scores "at".
+		if st.Kind == model.KindSubscription && pct != nil && *pct == 100 && st.OK && !st.NeedsAuth {
+			// The number on the bar is remaining quota. 100% is untouched and
+			// stays green even when pace is "at"/"over" or there is no window.
 			pace = model.PaceBelow
-			cls = pace
+			cls = model.PaceBelow
 		}
 		wm := waybarMonitor{
 			Provider:   st.Provider,
@@ -295,7 +295,18 @@ func clampPctPtr(v int) *int {
 	return &v
 }
 
+// authExpired reports a monitor that was connected but whose OAuth login can
+// no longer be refreshed (refresh token expired or revoked). A monitor that
+// was never connected reports "not connected …" instead.
+func authExpired(s model.Status) bool {
+	return s.NeedsAuth && !strings.HasPrefix(s.Error, "not connected")
+}
+
 func monitorClass(s model.Status, now time.Time) string {
+	if authExpired(s) {
+		// Usage stops updating until someone reconnects: show it red.
+		return waybarClassError
+	}
 	if s.NeedsAuth {
 		return waybarClassAuth
 	}
@@ -327,6 +338,8 @@ func compactText(s model.Status, icon string, pct *int) string {
 		icon = providerIcon(s.Provider)
 	}
 	switch {
+	case authExpired(s):
+		return icon + "!"
 	case s.NeedsAuth:
 		return icon + " ?"
 	case !s.OK:
@@ -361,6 +374,9 @@ func monitorDetail(s model.Status, now time.Time) string {
 		msg := s.Error
 		if msg == "" {
 			msg = "not connected"
+		}
+		if authExpired(s) {
+			msg = "login expired — reconnect in the dashboard\n  " + msg
 		}
 		return head + "\n  " + msg
 	}

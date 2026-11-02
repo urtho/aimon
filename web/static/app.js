@@ -72,6 +72,10 @@
   };
   const paceOf = (sp, nowSec) => {
     const expected = linearUsed(sp, nowSec);
+    // 100% remaining is untouched quota. At window start linear expected is
+    // ~0, so 0 used would score "at" (amber). Full quota is always green.
+    const left = Math.max(0, Math.round(100 - (Number(sp.used) || 0)));
+    if (left >= 100) return { class: "below", expected: expected == null ? 0 : expected };
     if (expected == null) return null;
     const d = sp.used - expected;
     const cls = d > PACE_SLACK ? "over" : d < -PACE_SLACK ? "below" : "at";

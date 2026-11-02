@@ -261,14 +261,18 @@ func TestMonitorIconsNumbersSecondSeat(t *testing.T) {
 			Spans: []model.Span{{Name: "1w", Used: 70}}},
 		{Provider: "claude", Label: "Claude (Team 2)", Kind: model.KindSubscription, OK: true,
 			Spans: []model.Span{{Name: "1w", Used: 50}}},
+		{Provider: "claude", Label: "Claude (Team 3)", Kind: model.KindSubscription, OK: true,
+			Spans: []model.Span{{Name: "1w", Used: 10}}},
 	}
 	icons := monitorIcons(all)
 	if icons["claude/Claude (Max)"] != "C" || icons["claude/Claude (Team)"] != "C2" ||
-		icons["claude/Claude (Team 2)"] != "C3" || icons["xai/Grok"] != "X" {
+		icons["claude/Claude (Team 2)"] != "C3" || icons["claude/Claude (Team 3)"] != "C4" ||
+		icons["xai/Grok"] != "X" {
 		t.Fatalf("icons = %v", icons)
 	}
 	got := formatWaybar(all, nil, now)
-	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "C2 30%") || !strings.Contains(got.Text, "C3 50%") {
+	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "C2 30%") ||
+		!strings.Contains(got.Text, "C3 50%") || !strings.Contains(got.Text, "C4 90%") {
 		t.Fatalf("text = %q", got.Text)
 	}
 	// Filtering to the team seat alone must keep its C2 token.
@@ -292,5 +296,47 @@ func TestFormatWaybarFullQuotaIsGreen(t *testing.T) {
 	}
 	if !strings.Contains(got.Text, `color="#7dffb3"`) || !strings.Contains(got.Text, "C 100%") {
 		t.Fatalf("100%% should be green: %q", got.Text)
+	}
+	if strings.Contains(got.Text, `color="#ffcc66"`) || strings.Contains(got.Text, `color="#ff5555"`) {
+		t.Fatalf("100%% must not be amber or red: %q", got.Text)
+	}
+	if strings.Contains(got.Tooltip, " at ") {
+		t.Fatalf("tooltip still says at for full quota: %q", got.Tooltip)
+	}
+}
+
+func TestFormatWaybarFullQuotaWithoutWindowIsGreen(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	got := formatWaybar([]model.Status{{
+		Provider: "openai", Label: "Codex", Kind: model.KindSubscription, OK: true,
+		Balance: fptr(100),
+	}}, nil, now)
+	if got.Class != model.PaceBelow || got.Monitors[0].Class != model.PaceBelow {
+		t.Fatalf("class = %q monitor = %q, want below", got.Class, got.Monitors[0].Class)
+	}
+	if !strings.Contains(got.Text, `color="#7dffb3"`) || !strings.Contains(got.Text, "AI 100%") {
+		t.Fatalf("balance-only 100%% should be green: %q", got.Text)
+	}
+}
+
+func TestFormatWaybarAuthExpired(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	got := formatWaybar([]model.Status{
+		{Provider: "claude", Label: "Claude (Max)", Kind: model.KindSubscription, NeedsAuth: true,
+			Error: "auth: refresh token: token endpoint 400: Refresh token expired"},
+		{Provider: "claude", Label: "Claude (Team)", Kind: model.KindSubscription, NeedsAuth: true,
+			Error: "not connected — click Connect to authorize"},
+	}, nil, now)
+	if got.Text != `<span color="#ff5555">C!</span> · <span color="#ffcc66">C2 ?</span>` {
+		t.Fatalf("text = %q", got.Text)
+	}
+	if got.Class != waybarClassError {
+		t.Fatalf("class = %q", got.Class)
+	}
+	if got.Monitors[0].Class != waybarClassError || got.Monitors[1].Class != waybarClassAuth {
+		t.Fatalf("monitor classes = %q, %q", got.Monitors[0].Class, got.Monitors[1].Class)
+	}
+	if !strings.Contains(got.Tooltip, "login expired — reconnect") {
+		t.Fatalf("tooltip = %q", got.Tooltip)
 	}
 }

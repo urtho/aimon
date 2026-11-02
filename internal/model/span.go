@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -96,6 +97,12 @@ func (sp Span) Pace(now time.Time) (class string, expected float64, ok bool) {
 	expected, ok = sp.LinearUsed(now)
 	if !ok {
 		return "", 0, false
+	}
+	// 100% remaining is untouched quota. A window that just reset has linear
+	// expected ≈ 0, so 0 used would score "at" (amber). Full quota is never
+	// a pace concern — the bar and dashboard always render it green.
+	if math.Round(100-sp.Used) >= 100 {
+		return PaceBelow, expected, true
 	}
 	d := sp.Used - expected
 	switch {
