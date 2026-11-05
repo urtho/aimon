@@ -34,7 +34,7 @@ type Config struct {
 // Monitor describes one account to poll. Only the fields relevant to the chosen
 // provider are read; the rest may be left empty.
 type Monitor struct {
-	Provider string `yaml:"provider"` // deepseek | openrouter | anthropic | elevenlabs | serper | claude | openai | xai
+	Provider string `yaml:"provider"` // deepseek | openrouter | anthropic | brave | elevenlabs | serper | claude | openai | xai
 	Label    string `yaml:"label"`    // display name / account id (unique per provider)
 	Enabled  *bool  `yaml:"enabled"`  // defaults to true when omitted
 
@@ -53,8 +53,12 @@ type Monitor struct {
 	CreditBalance float64 `yaml:"credit_balance"`
 	CreditAsOf    string  `yaml:"credit_as_of"` // "2006-01-02" or RFC3339
 
-	// CreditPrice is the USD value of one Serper credit (default 0.001).
+	// CreditPrice is the USD value of one Serper credit (default 0.001) or one
+	// Brave request (default 0.005).
 	CreditPrice float64 `yaml:"credit_price"`
+
+	// CreditBaseCount is the Brave counter's value when credit_balance was read.
+	CreditBaseCount int64 `yaml:"credit_base_count"`
 
 	// Subscription / OAuth providers.
 	OAuth        bool   `yaml:"oauth"`         // use the interactive OAuth flow
