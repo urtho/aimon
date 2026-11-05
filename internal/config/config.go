@@ -34,7 +34,7 @@ type Config struct {
 // Monitor describes one account to poll. Only the fields relevant to the chosen
 // provider are read; the rest may be left empty.
 type Monitor struct {
-	Provider string `yaml:"provider"` // deepseek | openrouter | anthropic | claude | openai | xai
+	Provider string `yaml:"provider"` // deepseek | openrouter | anthropic | elevenlabs | serper | claude | openai | xai
 	Label    string `yaml:"label"`    // display name / account id (unique per provider)
 	Enabled  *bool  `yaml:"enabled"`  // defaults to true when omitted
 
@@ -43,7 +43,7 @@ type Monitor struct {
 	PollInterval time.Duration `yaml:"poll_interval"`
 
 	// Credit/cost providers.
-	APIKey   string `yaml:"api_key"`   // DeepSeek, OpenRouter, x.ai
+	APIKey   string `yaml:"api_key"`   // DeepSeek, OpenRouter, x.ai, ElevenLabs, Serper
 	AdminKey string `yaml:"admin_key"` // Anthropic Admin API (sk-ant-admin-...)
 
 	// Anthropic has no public prepaid-balance API. Set credit_balance to the
@@ -52,6 +52,9 @@ type Monitor struct {
 	// (exact, from the cost report). Bump the baseline when you buy more credits.
 	CreditBalance float64 `yaml:"credit_balance"`
 	CreditAsOf    string  `yaml:"credit_as_of"` // "2006-01-02" or RFC3339
+
+	// CreditPrice is the USD value of one Serper credit (default 0.001).
+	CreditPrice float64 `yaml:"credit_price"`
 
 	// Subscription / OAuth providers.
 	OAuth        bool   `yaml:"oauth"`         // use the interactive OAuth flow

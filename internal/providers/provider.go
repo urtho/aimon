@@ -39,6 +39,10 @@ func Build(m config.Monitor, oauthMgr *oauth.Manager) (Provider, error) {
 		return newOpenRouter(m), nil
 	case "anthropic":
 		return newAnthropic(m), nil
+	case "elevenlabs":
+		return newElevenLabs(m), nil
+	case "serper":
+		return newSerper(m), nil
 	case "claude":
 		return newClaude(m, oauthMgr), nil
 	case "openai", "codex":

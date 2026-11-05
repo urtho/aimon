@@ -80,6 +80,19 @@ monitors:
     label: "DeepSeek"
     api_key: "${DEEPSEEK_API_KEY}"
 
+  # Serper.dev prepaid credits, shown in USD at credit_price (default 0.001).
+  # - provider: serper
+  #   label: "Serper"
+  #   api_key: "${SERPER_API_KEY}"
+  #   credit_price: 0.001
+  #   poll_interval: 30m
+
+  # ElevenLabs monthly credits. The key needs the user_read permission.
+  # - provider: elevenlabs
+  #   label: "ElevenLabs"
+  #   api_key: "${ELEVENLABS_API_KEY}"
+  #   poll_interval: 30m
+
   # --- Anthropic API (Admin API) -------------------------------------------
   # Requires an Admin API key (sk-ant-admin-...), NOT a normal API key.
   # Default: shows month-to-date spend (Anthropic has no public balance API).

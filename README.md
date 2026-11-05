@@ -20,6 +20,8 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 |---|---|---|---|
 | **DeepSeek** | Prepaid balance (`/user/balance`) | `api_key` | ✅ verified |
 | **OpenRouter** | Credit balance + rate-limit (`/credits`, `/key`) | `api_key` | ✅ verified |
+| **Serper** | Prepaid credits in USD (`/account`), at `credit_price` | `api_key` | ⚠️ endpoint not in Serper's public docs |
+| **ElevenLabs** | Monthly credits left (`/v1/user/subscription`) | `api_key` with `user_read` | ✅ documented |
 | **Anthropic API** | Month-to-date spend, or **credits left** (baseline) | `admin_key` (`sk-ant-admin-…`) | ✅ verified |
 | **Claude Pro/Max** | Subscription connection (usage best-effort) | OAuth — connect in UI | 🔶 OAuth verified, usage best-effort |
 | **OpenAI / Codex** | Subscription quota windows (% left + resets) | OAuth — connect in UI (or `token_file`/`bearer_token`) | 🔶 Internal usage endpoint, best-effort |
