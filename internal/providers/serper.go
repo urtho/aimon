@@ -45,6 +45,9 @@ func (s *serper) Fetch(ctx context.Context) (model.Status, error) {
 		Balance *float64 `json:"balance"`
 	}
 	code, raw, err := getJSON(ctx, s.base+"/account", map[string]string{"X-API-KEY": s.apiKey}, &body)
+	if code == 0 {
+		return model.Status{}, err
+	}
 	if code != 200 {
 		// Checked first: an error page need not be JSON, and its status says more.
 		return model.Status{}, fmt.Errorf("serper %d: %s", code, snippet(raw, 160))

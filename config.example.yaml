@@ -87,6 +87,17 @@ monitors:
   #   credit_price: 0.001
   #   poll_interval: 30m
 
+  # On-chain wallet, read from a public node with no key. chain: algorand (spendable
+  # ALGO, default node algonode) or evm (native balance, base_url and unit required).
+  # Several addresses report the lowest.
+  # - provider: wallet
+  #   label: "My wallet"
+  #   chain: algorand
+  #   addresses: ["YOUR-ADDRESS"]
+  #   warn_below: 2
+  #   crit_below: 1
+  #   poll_interval: 30m
+
   # ElevenLabs monthly credits. The key needs the user_read permission.
   # - provider: elevenlabs
   #   label: "ElevenLabs"

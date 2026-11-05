@@ -42,6 +42,9 @@ func (e *elevenLabs) Fetch(ctx context.Context) (model.Status, error) {
 	}
 	var body elSubscription
 	code, raw, err := getJSON(ctx, e.base+"/v1/user/subscription", map[string]string{"xi-api-key": e.apiKey}, &body)
+	if code == 0 {
+		return model.Status{}, err
+	}
 	if code != 200 {
 		// Checked first: an error page need not be JSON, and its status says more.
 		return model.Status{}, fmt.Errorf("elevenlabs %d: %s", code, snippet(raw, 160))

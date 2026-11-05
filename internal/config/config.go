@@ -34,7 +34,7 @@ type Config struct {
 // Monitor describes one account to poll. Only the fields relevant to the chosen
 // provider are read; the rest may be left empty.
 type Monitor struct {
-	Provider string `yaml:"provider"` // deepseek | openrouter | anthropic | elevenlabs | serper | claude | openai | xai
+	Provider string `yaml:"provider"` // deepseek | openrouter | anthropic | elevenlabs | serper | wallet | claude | openai | xai
 	Label    string `yaml:"label"`    // display name / account id (unique per provider)
 	Enabled  *bool  `yaml:"enabled"`  // defaults to true when omitted
 
@@ -55,6 +55,14 @@ type Monitor struct {
 
 	// CreditPrice is the USD value of one Serper credit (default 0.001).
 	CreditPrice float64 `yaml:"credit_price"`
+
+	// On-chain wallets (no key): chain is "algorand" or "evm". Several addresses
+	// report the lowest balance. warn_below / crit_below are in the coin's unit.
+	Chain     string   `yaml:"chain"`
+	Addresses []string `yaml:"addresses"`
+	Unit      string   `yaml:"unit"`
+	WarnBelow float64  `yaml:"warn_below"`
+	CritBelow float64  `yaml:"crit_below"`
 
 	// Subscription / OAuth providers.
 	OAuth        bool   `yaml:"oauth"`         // use the interactive OAuth flow
