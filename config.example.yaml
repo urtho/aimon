@@ -87,16 +87,6 @@ monitors:
   #   credit_price: 0.001
   #   poll_interval: 30m
 
-  # Brave Search API: no balance API, so an estimate from a billed-request counter.
-  # credit_base_count is the counter's size when you read credit_balance.
-  # - provider: brave
-  #   label: "Brave"
-  #   base_url: "http://search.ts.v.nodely.io/counters/braveapi"
-  #   credit_balance: 20.00
-  #   credit_as_of: "2026-11-05"
-  #   credit_base_count: 0
-  #   poll_interval: 10m
-
   # ElevenLabs monthly credits. The key needs the user_read permission.
   # - provider: elevenlabs
   #   label: "ElevenLabs"
