@@ -22,16 +22,16 @@ services:
     # Run as the host user so the bind-mounted ./data is writable.
     user: "${UID:-1000}:${GID:-1000}"
 
-    ports:
-      - "${AIMON_PORT:-8080}:8080"
-      # Codex/OpenAI registers http://localhost:1455/auth/callback — the
-      # container must listen here so the browser redirect can complete.
-      - "1455:1455"
+    # Host network: NetworkManager claims new docker bridges and drops their
+    # gateway address, which left :8080 published but unreachable. Listeners
+    # stay on localhost. Codex/OpenAI still redirects to
+    # http://localhost:1455/auth/callback.
+    network_mode: host
 
     environment:
       AIMON_LOG: ${AIMON_LOG:-info}
-      AIMON_LISTEN: ":8080"
-      AIMON_OAUTH_LISTEN: ":1455"
+      AIMON_LISTEN: "127.0.0.1:8080"
+      AIMON_OAUTH_LISTEN: "127.0.0.1:1455"
       AIMON_DATABASE: "/data/aimon.db"
 
     # Secrets referenced as ${...} inside config.yaml come from .env.
