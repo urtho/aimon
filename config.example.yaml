@@ -24,6 +24,11 @@ monitors:
   - provider: claude
     label: "Claude (Max)"
     oauth: true
+    # A `claude setup-token` (inference scope only) cannot call the OAuth usage
+    # endpoint. Set bearer_token and aimon reads the plan windows from the
+    # rate-limit headers on one 1-token call. Poll slowly; each poll spends a token.
+    # bearer_token: "${CLAUDE_C1_TOKEN}"
+    # poll_interval: 30m
 
   # Second Claude subscription (e.g. a Team seat on a different login). Each
   # label stores its own OAuth token. When connecting, authorize in a private

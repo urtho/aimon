@@ -66,8 +66,9 @@ type Monitor struct {
 
 	// Subscription / OAuth providers.
 	OAuth        bool   `yaml:"oauth"`         // use the interactive OAuth flow
-	BearerToken  string `yaml:"bearer_token"`  // OpenAI/x.ai: pre-obtained OAuth access token
+	BearerToken  string `yaml:"bearer_token"`  // static token: ChatGPT OAuth, x.ai, or a Claude setup-token
 	TokenFile    string `yaml:"token_file"`    // live CLI credentials, e.g. ~/.codex/auth.json or ~/.grok/auth.json
+	Model        string `yaml:"model"`         // Claude setup-token probe model (default claude-haiku-4-5)
 	AccountID    string `yaml:"account_id"`    // OpenAI: optional ChatGPT workspace/account override
 	UsageURL     string `yaml:"usage_url"`     // override the usage endpoint
 	AuthorizeURL string `yaml:"authorize_url"` // override the OAuth authorize endpoint

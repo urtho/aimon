@@ -86,6 +86,9 @@ func (o *openAI) Fetch(ctx context.Context) (model.Status, error) {
 		var err error
 		token, accountID, err = readCodexCredentials(o.tokenFile)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				st.Error = "not signed in — run codex login"
+			}
 			return st, fmt.Errorf("OpenAI token_file: %w", err)
 		}
 	}

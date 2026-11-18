@@ -1,10 +1,13 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +28,16 @@ const (
 	claudeRedirectURI = "https://platform.claude.com/oauth/code/callback"
 	// Best-effort usage endpoint; override per-monitor with `usage_url`.
 	claudeDefaultUsageURL = "https://api.anthropic.com/api/oauth/usage"
+	// A `claude setup-token` only has the inference scope, so /api/oauth/usage
+	// answers 403. The plan windows travel on every Messages response as
+	// anthropic-ratelimit-unified-* headers (the same ones Claude Code reads).
+	claudeProbeURL   = "https://api.anthropic.com/v1/messages"
+	claudeProbeModel = "claude-haiku-4-5"
+	// Match the Claude Code CLI closely enough that a subscription setup-token
+	// is accepted. A third-party-looking call is rejected.
+	claudeProbeSystem = "You are Claude Code, Anthropic's official CLI for Claude."
+	claudeProbeUA     = "claude-cli/2.1.317 (external, cli)"
+	claudeProbeBeta   = "oauth-2025-04-20,claude-code-20250219"
 )
 
 // OAuthProvider is implemented by providers that authenticate interactively.
@@ -39,10 +52,13 @@ type OAuthProvider interface {
 
 // claude reports Claude Pro/Max subscription usage via an OAuth access token.
 type claude struct {
-	label    string
-	oauth    *oauth.Manager
-	usageURL string
-	authURL  string // authorize endpoint (override via config authorize_url)
+	label      string
+	oauth      *oauth.Manager
+	usageURL   string
+	authURL    string // authorize endpoint (override via config authorize_url)
+	bearer     string // static setup-token; skips the OAuth usage endpoint
+	probeURL   string
+	probeModel string
 
 	// Last good usage snapshot, reused across transient endpoint hiccups so the
 	// card doesn't flap between window rows and a bare "connected" every time a
@@ -54,8 +70,13 @@ type claude struct {
 }
 
 // staleSpanTTL is how long the last good usage windows keep being shown when
-// the usage endpoint fails transiently.
-const staleSpanTTL = 15 * time.Minute
+// the usage endpoint fails transiently. Setup-token probes run on a much
+// longer cadence (one inference call), so their last good reading outlives
+// a single missed poll.
+const (
+	staleSpanTTL       = 15 * time.Minute
+	bearerStaleSpanTTL = 90 * time.Minute
+)
 
 func newClaude(m config.Monitor, mgr *oauth.Manager) *claude {
 	usage := m.UsageURL
@@ -66,7 +87,18 @@ func newClaude(m config.Monitor, mgr *oauth.Manager) *claude {
 	if authURL == "" {
 		authURL = claudeAuthorize
 	}
-	return &claude{label: m.Label, oauth: mgr, usageURL: usage, authURL: authURL}
+	probeURL := claudeProbeURL
+	if base := strings.TrimRight(m.BaseURL, "/"); base != "" {
+		probeURL = base + "/v1/messages"
+	}
+	probeModel := m.Model
+	if probeModel == "" {
+		probeModel = claudeProbeModel
+	}
+	return &claude{
+		label: m.Label, oauth: mgr, usageURL: usage, authURL: authURL,
+		bearer: strings.TrimSpace(m.BearerToken), probeURL: probeURL, probeModel: probeModel,
+	}
 }
 
 func (c *claude) ID() string    { return "claude" }
@@ -103,6 +135,9 @@ func (c *claude) OAuthConfig() oauth.Config {
 
 func (c *claude) Fetch(ctx context.Context) (model.Status, error) {
 	base := model.Status{Provider: c.ID(), Label: c.label, Kind: c.Kind()}
+	if c.bearer != "" {
+		return c.fetchProbe(ctx, base)
+	}
 
 	token, err := c.oauth.AccessToken(ctx, c.label, c.OAuthConfig())
 	if errors.Is(err, store.ErrNoToken) {
@@ -197,15 +232,172 @@ func tightestSpan(spans []model.Span, windowedOnly bool) (model.Span, bool) {
 	return worst, found
 }
 
+func (c *claude) spanTTL() time.Duration {
+	if c.bearer != "" {
+		return bearerStaleSpanTTL
+	}
+	return staleSpanTTL
+}
+
 // applyLastSpans reuses the last good windows when they're still fresh,
 // marking the status as stale. Reports whether it applied anything.
 func (c *claude) applyLastSpans(st *model.Status) bool {
-	if len(c.lastSpans) == 0 || time.Since(c.lastSpansAt) > staleSpanTTL {
+	if len(c.lastSpans) == 0 || time.Since(c.lastSpansAt) > c.spanTTL() {
 		return false
 	}
 	applySpans(st, c.lastSpans)
 	st.Extra["usage"] = fmt.Sprintf("stale (%ds old)", int(time.Since(c.lastSpansAt).Seconds()))
 	return true
+}
+
+// fetchProbe reads plan quota from the rate-limit headers on a 1-token
+// Messages call. A setup-token cannot call /api/oauth/usage.
+func (c *claude) fetchProbe(ctx context.Context, base model.Status) (model.Status, error) {
+	base.Plan = "Pro/Max"
+	base.Unit = "%"
+	base.Extra = map[string]any{"usage_source": "rate-limit"}
+
+	body, _ := json.Marshal(map[string]any{
+		"model":      c.probeModel,
+		"max_tokens": 1,
+		"system":     claudeProbeSystem,
+		"messages":   []map[string]string{{"role": "user", "content": "quota"}},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.probeURL, bytes.NewReader(body))
+	if err != nil {
+		return base, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.bearer)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", claudeProbeBeta)
+	req.Header.Set("User-Agent", claudeProbeUA)
+	req.Header.Set("x-app", "cli")
+
+	resp, err := sharedClient.Do(req)
+	if err != nil {
+		if c.applyLastSpans(&base) {
+			base.OK = true
+			return base, nil
+		}
+		return base, fmt.Errorf("claude usage probe: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+
+	spans := parseClaudeRateHeaders(resp.Header)
+	if len(spans) > 0 && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusTooManyRequests) {
+		c.lastSpans, c.lastSpansAt = spans, time.Now()
+		base.OK = true
+		applySpans(&base, spans)
+		base.Extra["usage_http"] = resp.StatusCode
+		return base, nil
+	}
+
+	base.Extra["usage_http"] = resp.StatusCode
+	if msg := claudeAPIError(raw); msg != "" {
+		base.Extra["usage_err"] = msg
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		base.NeedsAuth = true
+		base.Error = "long-lived token rejected — replace the setup-token"
+		return base, nil
+	}
+	if c.applyLastSpans(&base) {
+		base.OK = true
+		return base, nil
+	}
+	base.Extra["usage"] = "unavailable"
+	return base, fmt.Errorf("claude usage probe HTTP %d", resp.StatusCode)
+}
+
+// parseClaudeRateHeaders reads anthropic-ratelimit-unified-<window>-utilization
+// (a percent) and the matching -reset header (unix seconds).
+func parseClaudeRateHeaders(h http.Header) []model.Span {
+	const prefix = "Anthropic-Ratelimit-Unified-"
+	const utilSuffix = "-Utilization"
+	type entry struct {
+		span  model.Span
+		order int
+	}
+	var entries []entry
+	for key := range h {
+		if !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, utilSuffix) {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(key, prefix), utilSuffix)
+		u, err := strconv.ParseFloat(strings.TrimSpace(h.Get(key)), 64)
+		if err != nil {
+			continue
+		}
+		label, order, dur := claudeRateWindow(name)
+		sp := model.Span{Name: label, Used: clampPct(u), Duration: dur}
+		if r, ok := headerUnix(h.Get(prefix + name + "-Reset")); ok {
+			sp.ResetAt = r
+		}
+		entries = append(entries, entry{sp, order})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].order != entries[j].order {
+			return entries[i].order < entries[j].order
+		}
+		return entries[i].span.Name < entries[j].span.Name
+	})
+	spans := make([]model.Span, len(entries))
+	for i, e := range entries {
+		spans[i] = e.span
+	}
+	return spans
+}
+
+func claudeRateWindow(name string) (label string, order int, dur int64) {
+	switch strings.ToLower(name) {
+	case "5h":
+		return "5h", 0, 5 * 3600
+	case "7d":
+		return "1w", 1, 7 * 24 * 3600
+	case "7d_opus":
+		return "1w opus", 2, 7 * 24 * 3600
+	case "7d_sonnet":
+		return "1w sonnet", 3, 7 * 24 * 3600
+	case "7d_oi":
+		return "1w fable", 4, 7 * 24 * 3600
+	default:
+		label = strings.ToLower(strings.ReplaceAll(name, "_", " "))
+		return label, 50, model.ParseWindowDuration(label)
+	}
+}
+
+func headerUnix(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.Unix(), true
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
+	}
+	if f > 1e12 { // milliseconds
+		f = f / 1000
+	}
+	return int64(f), true
+}
+
+// claudeAPIError returns a short upstream error type, never a token or body.
+func claudeAPIError(raw []byte) string {
+	var wrap struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &wrap) != nil || wrap.Error.Type == "" {
+		return ""
+	}
+	return wrap.Error.Type
 }
 
 // claudeWindowLabels maps the usage endpoint's window keys to short row labels

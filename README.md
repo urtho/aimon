@@ -42,6 +42,10 @@ A small, self-hosted Go web app that watches your **AI credit balances** and
 > **Claude** uses the same OAuth client as Claude Code; the token exchange and
 > refresh are solid, but the subscription *usage* endpoint is not a stable
 > public contract — set `usage_url` if your plan exposes one.
+> A long-lived `claude setup-token` has only the inference scope, so that
+> endpoint answers 403. Set `bearer_token` instead: aimon sends one 1-token
+> Messages call and reads the plan windows from the `anthropic-ratelimit-unified-*`
+> headers. Give that monitor a slow `poll_interval` (the call spends a token).
 >
 > **OpenAI** reads the Codex subscription meter through ChatGPT's internal
 > `backend-api/wham/usage` endpoint. It shows the returned session, weekly, and
@@ -217,16 +221,20 @@ config.yaml ─▶ providers ─▶ poller (every 60s, concurrent)
 
 ```json
 {
-  "text": "C 92% · X 58% · AI 75%",
-  "tooltip": "Claude (Max)  Max\n  80%/1w  resets 4d2h  below · linear 58% left\n…",
+  "text": "C 92%/80% · X 58% · AI 90%/75%",
+  "tooltip": "Claude (Max)  Max\n  92%/5h  resets 2h  below · linear 40% left\n  80%/1w  resets 4d2h  below · linear 58% left\n…",
   "class": "over",
   "alt": "over",
   "percentage": 58,
-  "monitors": [{ "provider": "claude", "text": "C 92%", "class": "below", "pace": "below", "percentage": 92 }]
+  "monitors": [{ "provider": "claude", "text": "C 92%/80%", "class": "below", "pace": "below", "percentage": 80 }]
 }
 ```
 
-Subscription bar values (%, color, tooltip) use **every timed quota window** — the 5h session and the weekly caps alike — so a monitor's % is the **minimum remaining** across them (whichever runs out first), and its color is the worst pace among them. A window whose reset time has already passed (a stale snapshot) counts as untouched. Unwindowed meters such as Claude extra credits never drive the bar. Subscription colors compare **used %** to a **linear burn** across each quota window (elapsed / duration). Within ±5 percentage points is `at`; slower than that is `below` (under budget); faster is `over`. `class` / `alt` is the worst state among the (filtered) monitors: `below`, `at`, `over`, `ok` (credits, or no window), `auth` (needs Connect), `error`, or `empty`. `percentage` (top level) is the tightest remaining quota among healthy monitors; each entry in `monitors` carries its own `percentage` and the `spans` behind it. Compact tokens use `C` / `X` / `AI` / `OR` / `DS` / `AN`; `text` is Pango-colored per monitor (set Waybar `markup` to `pango`). When a provider has several monitors (e.g. a personal Claude Max plus Team seats), the first one in config order keeps the plain token and later ones are numbered — `C`, `C2`, `C3`, `C4`, … — even when the gadget filters down to one label (`?label=Claude%20(Team)`). A reading of 100% remaining is always green, including right after a window resets (when linear expected is ~0 and untouched quota would otherwise score `at`).
+A subscription's compact token shows the quota left in **both windows**, short then long: `C2 82%/63%` is 82% of the 5h session and 63% of the weekly cap. Anything shorter than a week counts as short; weekly and longer (Grok's monthly cycle) as long. A monitor with only one window shows one value (`X 91%`), and windows of the same group (`1w`, `1w opus`) show the least left and the worst pace among them. The prefix and `/` are white. Each value is colored by its own pace: `below` green, `at` amber, `over` red, with 100% always green and 0% always red. A reading of 100% stays green right after a window resets, when linear expected is ~0 and untouched quota would otherwise score `at`.
+
+Pace compares **used %** to a **linear burn** across each quota window (elapsed / duration). Within ±5 percentage points is `at`; slower than that is `below` (under budget); faster is `over`. A window whose reset time has already passed (a stale snapshot) counts as untouched. Unwindowed meters such as Claude extra credits never drive the bar.
+
+`class` / `alt` is the worst state among the (filtered) monitors: `below`, `at`, `over`, `ok` (credits, or no window), `auth` (needs Connect), `error`, or `empty`. `percentage` (top level) is the tightest remaining quota among healthy monitors; each entry in `monitors` carries its own `percentage` (the minimum across its windows) and the `spans` behind it. Compact tokens use `C` / `X` / `AI` / `OR` / `DS` / `AN`; `text` is Pango-colored (set Waybar `markup` to `pango`). When a provider has several monitors (e.g. a personal Claude Max plus Team seats), the first one in config order keeps the plain token and later ones are numbered — `C`, `C2`, `C3`, `C4`, … — even when the gadget filters down to one label (`?label=Claude%20(Team)`).
 
 ### Waybar module
 

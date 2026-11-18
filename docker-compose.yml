@@ -44,6 +44,9 @@ services:
       - ./data:/data
       # Bind-mount the config read-only.
       - ./config.yaml:/etc/aimon/config.yaml:ro
+      # Codex CLI credentials, read-only. Directory (not the file) so an atomic
+      # replace by `codex login` stays visible. Absent until the next login.
+      - ${CODEX_AUTH_DIR:-/home/urtho/.codex}:/codex:ro
 
     # Read-only root FS (everything writable lives under the /data bind mount).
     read_only: true

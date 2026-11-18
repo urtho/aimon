@@ -3,9 +3,13 @@ package providers
 import (
 	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/algonode/aimon/internal/config"
 	"github.com/algonode/aimon/internal/model"
 )
 
@@ -101,6 +105,93 @@ func TestParseClaudeUsageSkipsExtraCredits(t *testing.T) {
 	if st.Balance == nil || *st.Balance != 100 || st.Used == nil || *st.Used != 0 {
 		t.Fatalf("used=%v balance=%v, want 0 / 100", st.Used, st.Balance)
 	}
+}
+
+func TestParseClaudeRateHeaders(t *testing.T) {
+	h := make(http.Header)
+	h.Set("anthropic-ratelimit-unified-5h-utilization", "12.5")
+	h.Set("anthropic-ratelimit-unified-5h-reset", "1780000000")
+	h.Set("anthropic-ratelimit-unified-7d-utilization", "40")
+	h.Set("anthropic-ratelimit-unified-7d-reset", "2026-06-12T00:00:00Z")
+	h.Set("anthropic-ratelimit-unified-7d_oi-utilization", "80")
+	h.Set("anthropic-ratelimit-unified-7d-status", "allowed")
+	spans := parseClaudeRateHeaders(h)
+	if len(spans) != 3 {
+		t.Fatalf("got %d spans: %+v", len(spans), spans)
+	}
+	if spans[0].Name != "5h" || spans[0].Used != 12.5 || spans[0].ResetAt != 1780000000 {
+		t.Fatalf("5h span = %+v", spans[0])
+	}
+	wantReset, _ := time.Parse(time.RFC3339, "2026-06-12T00:00:00Z")
+	if spans[1].Name != "1w" || spans[1].Used != 40 || spans[1].ResetAt != wantReset.Unix() {
+		t.Fatalf("1w span = %+v", spans[1])
+	}
+	if spans[2].Name != "1w fable" || spans[2].Used != 80 || spans[2].Duration != 7*24*3600 {
+		t.Fatalf("fable span = %+v", spans[2])
+	}
+}
+
+func TestClaudeProbeUsesSetupTokenHeaders(t *testing.T) {
+	var gotAuth, gotBeta, gotModel string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotBeta = r.Header.Get("anthropic-beta")
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotModel, _ = body["model"].(string)
+		if r.URL.Path != "/v1/messages" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		w.Header().Set("anthropic-ratelimit-unified-5h-utilization", "3")
+		w.Header().Set("anthropic-ratelimit-unified-5h-reset", "1780000000")
+		w.Header().Set("anthropic-ratelimit-unified-7d-utilization", "10")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[{"text":"q"}]}`))
+	}))
+	defer upstream.Close()
+
+	c := newClaude(config.Monitor{
+		Label: "Claude (Team)", BearerToken: "sk-ant-oat01-test", BaseURL: upstream.URL, Model: "claude-haiku-4-5",
+	}, nil)
+	st, err := c.Fetch(t.Context())
+	if err != nil || !st.OK || st.NeedsAuth {
+		t.Fatalf("probe status %+v err %v", st, err)
+	}
+	if gotAuth != "Bearer sk-ant-oat01-test" || !strings.Contains(gotBeta, "oauth-2025-04-20") || gotModel != "claude-haiku-4-5" {
+		t.Fatalf("request auth set=%t beta=%q model=%q", gotAuth != "", gotBeta, gotModel)
+	}
+	if len(st.Spans) != 2 || st.Spans[0].Name != "5h" || st.Spans[0].Used != 3 || st.Balance == nil || *st.Balance != 90 {
+		bal := -1.0
+		if st.Balance != nil {
+			bal = *st.Balance
+		}
+		t.Fatalf("spans %+v balance %v", st.Spans, bal)
+	}
+	if raw, ok := st.Extra["raw"]; ok {
+		t.Fatalf("probe must not keep the response body: %v", raw)
+	}
+}
+
+func TestClaudeProbeRejectsTokenWithoutEchoingBody(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"type":"authentication_error","message":"sk-ant-oat01-secret leaked"}}`))
+	}))
+	defer upstream.Close()
+	c := newClaude(config.Monitor{Label: "C1", BearerToken: "sk-ant-oat01-test", BaseURL: upstream.URL}, nil)
+	st, err := c.Fetch(t.Context())
+	if err != nil || st.OK || !st.NeedsAuth {
+		t.Fatalf("status %+v err %v", st, err)
+	}
+	blob := st.Error + fmtExtra(st)
+	if strings.Contains(blob, "sk-ant-oat01-secret") || strings.Contains(blob, "leaked") {
+		t.Fatalf("error echoed the upstream body: %s", blob)
+	}
+}
+
+func fmtExtra(st model.Status) string {
+	b, _ := json.Marshal(st.Extra)
+	return string(b)
 }
 
 func TestApplySpansIgnoresWindowless(t *testing.T) {
