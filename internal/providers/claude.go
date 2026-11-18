@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -313,7 +314,8 @@ func (c *claude) fetchProbe(ctx context.Context, base model.Status) (model.Statu
 }
 
 // parseClaudeRateHeaders reads anthropic-ratelimit-unified-<window>-utilization
-// (a percent) and the matching -reset header (unix seconds).
+// and the matching -reset header (unix seconds). Utilization is a fraction
+// (0.45 == 45%), unlike /api/oauth/usage, which reports a percent.
 func parseClaudeRateHeaders(h http.Header) []model.Span {
 	const prefix = "Anthropic-Ratelimit-Unified-"
 	const utilSuffix = "-Utilization"
@@ -332,7 +334,7 @@ func parseClaudeRateHeaders(h http.Header) []model.Span {
 			continue
 		}
 		label, order, dur := claudeRateWindow(name)
-		sp := model.Span{Name: label, Used: clampPct(u), Duration: dur}
+		sp := model.Span{Name: label, Used: clampPct(math.Round(u*10000) / 100), Duration: dur}
 		if r, ok := headerUnix(h.Get(prefix + name + "-Reset")); ok {
 			sp.ResetAt = r
 		}

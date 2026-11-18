@@ -107,13 +107,15 @@ func TestParseClaudeUsageSkipsExtraCredits(t *testing.T) {
 	}
 }
 
+// The headers carry a fraction: live C1 sent 7d-utilization 0.45 while
+// /api/oauth/usage reported 45 for the same window.
 func TestParseClaudeRateHeaders(t *testing.T) {
 	h := make(http.Header)
-	h.Set("anthropic-ratelimit-unified-5h-utilization", "12.5")
+	h.Set("anthropic-ratelimit-unified-5h-utilization", "0.125")
 	h.Set("anthropic-ratelimit-unified-5h-reset", "1780000000")
-	h.Set("anthropic-ratelimit-unified-7d-utilization", "40")
+	h.Set("anthropic-ratelimit-unified-7d-utilization", "0.4")
 	h.Set("anthropic-ratelimit-unified-7d-reset", "2026-06-12T00:00:00Z")
-	h.Set("anthropic-ratelimit-unified-7d_oi-utilization", "80")
+	h.Set("anthropic-ratelimit-unified-7d_oi-utilization", "0.8")
 	h.Set("anthropic-ratelimit-unified-7d-status", "allowed")
 	spans := parseClaudeRateHeaders(h)
 	if len(spans) != 3 {
@@ -142,9 +144,9 @@ func TestClaudeProbeUsesSetupTokenHeaders(t *testing.T) {
 		if r.URL.Path != "/v1/messages" {
 			t.Errorf("path %s", r.URL.Path)
 		}
-		w.Header().Set("anthropic-ratelimit-unified-5h-utilization", "3")
+		w.Header().Set("anthropic-ratelimit-unified-5h-utilization", "0.03")
 		w.Header().Set("anthropic-ratelimit-unified-5h-reset", "1780000000")
-		w.Header().Set("anthropic-ratelimit-unified-7d-utilization", "10")
+		w.Header().Set("anthropic-ratelimit-unified-7d-utilization", "0.1")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"content":[{"text":"q"}]}`))
 	}))
