@@ -32,6 +32,23 @@
 
   <main>
     <section class="cards" id="cards" aria-live="polite"></section>
+
+    <section class="credits" id="credits" hidden>
+      <h2 class="section-title">credits</h2>
+      <div class="table-wrap">
+        <table class="credit-table">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Network</th>
+              <th scope="col" class="num">Credits left</th>
+              <th scope="col" class="num">% above threshold</th>
+            </tr>
+          </thead>
+          <tbody id="credit-rows"></tbody>
+        </table>
+      </div>
+    </section>
     <p class="empty" id="empty" hidden>No monitors configured. Edit <code>config.yaml</code> and restart.</p>
   </main>
 

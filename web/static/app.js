@@ -15,6 +15,8 @@
   const cardsEl = document.getElementById("cards");
   const emptyEl = document.getElementById("empty");
   const tpl = document.getElementById("card-tpl");
+  const creditsEl = document.getElementById("credits");
+  const creditRowsEl = document.getElementById("credit-rows");
 
   const cards = new Map(); // id -> { root, refs, value, updatedAt, spans }
   let oauthCtx = { provider: "", label: "", state: "" };
@@ -29,6 +31,16 @@
     const v = Math.abs(n) >= 1000 ? n.toFixed(0) : n.toFixed(2);
     if (sym) return sym + Number(v).toLocaleString();
     return Number(v).toLocaleString() + (unit ? " " + unit : "");
+  };
+
+  // Coin or credit amount: money keeps 2 decimals; coins keep 4 significant digits
+  // below 1 so 0.0065 ETH does not round to 0.01.
+  const fmtAmount = (n, unit) => {
+    if (!unit || { USD: 1, CNY: 1, EUR: 1, GBP: 1 }[unit]) return fmtMoney(n, unit);
+    const opts = Math.abs(n) >= 1
+      ? { maximumFractionDigits: Math.abs(n) >= 1000 ? 0 : 2 }
+      : { maximumSignificantDigits: 4 };
+    return n.toLocaleString(undefined, opts) + " " + unit;
   };
 
   const relTime = (sec) => {
@@ -121,7 +133,10 @@
     emptyEl.hidden = true;
     const seen = new Set();
 
-    list.forEach((s) => {
+    const credits = list.filter((s) => s.kind === "credit");
+    renderCredits(credits);
+
+    list.filter((s) => s.kind !== "credit").forEach((s) => {
       const id = s.provider + "/" + s.label;
       seen.add(id);
       let c = cards.get(id);
@@ -136,6 +151,72 @@
     for (const [id, c] of cards) {
       if (!seen.has(id)) { c.root.remove(); cards.delete(id); }
     }
+  }
+
+  // ---------- credit table: one row per credit watcher ----------
+  // % above threshold is relative to warn_below: (balance / warn − 1) × 100.
+  // Color: under crit_below red, under warn_below amber, otherwise green.
+  function creditState(s) {
+    if (!s.ok) return { cls: "err", pct: null };
+    const x = s.extra || {};
+    const warn = Number(x.warn_below) || 0;
+    const crit = Number(x.crit_below) || 0;
+    const bal = s.balance;
+    if (bal == null) return { cls: "", pct: null };
+    const ref = warn > 0 ? warn : crit;
+    const pct = ref > 0 ? (bal / ref - 1) * 100 : null;
+    let cls = ref > 0 ? "ok" : "";
+    if (crit > 0 && bal < crit) cls = "err";
+    else if (warn > 0 && bal < warn) cls = "warn";
+    return { cls, pct, warn, crit };
+  }
+
+  const fmtPct = (p) => {
+    if (p == null) return "—";
+    const a = Math.abs(p);
+    const v = a >= 1000 ? Math.round(p).toLocaleString() : a >= 10 ? Math.round(p) : p.toFixed(1);
+    return (p > 0 ? "+" : "") + v + "%";
+  };
+
+  function renderCredits(list) {
+    creditsEl.hidden = list.length === 0;
+    creditRowsEl.replaceChildren(...list.map((s) => {
+      const st = creditState(s);
+      const x = s.extra || {};
+      const tr = document.createElement("tr");
+      tr.className = st.cls ? "row-" + st.cls : "";
+
+      const name = document.createElement("td");
+      const dot = document.createElement("span");
+      dot.className = "status-dot " + (st.cls || "");
+      name.append(dot, document.createTextNode(s.label));
+      name.className = "c-name";
+      if (x.note) name.title = x.note;
+
+      const net = document.createElement("td");
+      net.className = "c-net";
+      net.textContent = x.network || "API";
+
+      const left = document.createElement("td");
+      left.className = "num c-left";
+      if (!s.ok) {
+        left.textContent = s.needs_auth ? "not connected" : "error";
+        left.title = s.error || "";
+      } else {
+        left.textContent = s.balance != null ? fmtAmount(s.balance, s.unit) : "—";
+        left.title = s.updated_at ? "updated " + relTime(s.updated_at) : "";
+      }
+
+      const pct = document.createElement("td");
+      pct.className = "num c-pct";
+      pct.textContent = fmtPct(st.pct);
+      if (st.warn || st.crit) {
+        pct.title = "warn below " + fmtAmount(st.warn, s.unit) + ", crit below " + fmtAmount(st.crit, s.unit);
+      }
+
+      tr.append(name, net, left, pct);
+      return tr;
+    }));
   }
 
   // One row per quota span: "92%  /5h        resets 4h32m"

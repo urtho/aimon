@@ -94,10 +94,13 @@ monitors:
 
   # On-chain wallet, read from a public node with no key. chain: algorand (spendable
   # ALGO, default node algonode) or evm (native balance, base_url and unit required).
-  # Several addresses report the lowest.
+  # Several addresses report the lowest. network is the name in the dashboard's credits
+  # table (default "Algorand" / "EVM"). warn_below / crit_below work on any credit
+  # monitor; the table shows % above warn_below and colors under warn / crit.
   # - provider: wallet
   #   label: "My wallet"
   #   chain: algorand
+  #   # network: Algorand
   #   addresses: ["YOUR-ADDRESS"]
   #   warn_below: 2
   #   crit_below: 1

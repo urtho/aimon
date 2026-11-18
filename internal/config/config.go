@@ -57,8 +57,10 @@ type Monitor struct {
 	CreditPrice float64 `yaml:"credit_price"`
 
 	// On-chain wallets (no key): chain is "algorand" or "evm". Several addresses
-	// report the lowest balance. warn_below / crit_below are in the coin's unit.
+	// report the lowest balance. warn_below / crit_below are in the monitor's
+	// unit and apply to any credit monitor (wallet or prepaid API balance).
 	Chain     string   `yaml:"chain"`
+	Network   string   `yaml:"network"` // display name, e.g. "Base"; defaults from chain
 	Addresses []string `yaml:"addresses"`
 	Unit      string   `yaml:"unit"`
 	WarnBelow float64  `yaml:"warn_below"`

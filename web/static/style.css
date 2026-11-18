@@ -138,6 +138,30 @@ main { padding: 18px clamp(16px, 4vw, 48px) 40px; }
 .btn-primary:hover { background: var(--txt); }
 .btn-connect { padding: 5px 10px; font-size: 11px; }
 
+/* ---------- Credit table ---------- */
+.credits { margin-top: 28px; }
+.section-title {
+  margin: 0 0 10px; font-size: 10px; font-weight: 400; text-transform: uppercase;
+  letter-spacing: 1.2px; color: var(--txt-dim);
+}
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
+.credit-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.credit-table th, .credit-table td { padding: 8px 14px; text-align: left; white-space: nowrap; }
+.credit-table th {
+  font-size: 10px; font-weight: 400; text-transform: uppercase; letter-spacing: 1.2px;
+  color: var(--txt-dim); border-bottom: 1px solid var(--border);
+}
+.credit-table td { border-bottom: 1px solid var(--border); }
+.credit-table tbody tr:last-child td { border-bottom: none; }
+.credit-table tbody tr:hover { background: rgba(51, 255, 102, 0.04); }
+.credit-table .num { text-align: right; }
+.c-name { font-weight: 600; }
+.c-name .status-dot { display: inline-block; margin-right: 10px; vertical-align: middle; }
+.c-net { color: var(--txt-dim); }
+.c-left, .c-pct { font-weight: 700; }
+.row-warn .c-left, .row-warn .c-pct { color: var(--warn); }
+.row-err .c-left, .row-err .c-pct { color: var(--err); }
+
 /* ---------- Modal ---------- */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;

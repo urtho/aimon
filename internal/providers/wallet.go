@@ -17,6 +17,7 @@ import (
 type wallet struct {
 	label     string
 	chain     string
+	network   string
 	addresses []string
 	base      string
 	unit      string
@@ -33,7 +34,11 @@ func newWallet(m config.Monitor) *wallet {
 	if unit == "" && m.Chain == "algorand" {
 		unit = "ALGO"
 	}
-	return &wallet{label: m.Label, chain: m.Chain, addresses: m.Addresses, base: strings.TrimRight(base, "/"),
+	network := m.Network
+	if network == "" {
+		network = map[string]string{"algorand": "Algorand", "evm": "EVM"}[m.Chain]
+	}
+	return &wallet{label: m.Label, chain: m.Chain, network: network, addresses: m.Addresses, base: strings.TrimRight(base, "/"),
 		unit: unit, warn: m.WarnBelow, crit: m.CritBelow}
 }
 
@@ -64,7 +69,7 @@ func (w *wallet) Fetch(ctx context.Context) (model.Status, error) {
 			lowest = b
 		}
 	}
-	extra := map[string]any{"warn_below": w.warn, "crit_below": w.crit}
+	extra := map[string]any{"warn_below": w.warn, "crit_below": w.crit, "network": w.network}
 	if len(balances) > 1 {
 		extra["note"] = fmt.Sprintf("lowest of %d wallets", len(balances))
 	}

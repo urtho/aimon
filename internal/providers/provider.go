@@ -32,6 +32,38 @@ var sharedClient = &http.Client{Timeout: 25 * time.Second}
 // Build constructs the Provider for a monitor config, wiring the OAuth manager
 // for providers that need it.
 func Build(m config.Monitor, oauthMgr *oauth.Manager) (Provider, error) {
+	p, err := build(m, oauthMgr)
+	if err != nil || p.Kind() != model.KindCredit || (m.WarnBelow <= 0 && m.CritBelow <= 0) {
+		return p, err
+	}
+	return thresholded{p, m.WarnBelow, m.CritBelow}, nil
+}
+
+// thresholded adds warn_below / crit_below to a credit monitor's Extra when the
+// provider does not set them itself, so the dashboard can rate any balance.
+type thresholded struct {
+	Provider
+	warn, crit float64
+}
+
+func (t thresholded) Fetch(ctx context.Context) (model.Status, error) {
+	s, err := t.Provider.Fetch(ctx)
+	if err != nil {
+		return s, err
+	}
+	if s.Extra == nil {
+		s.Extra = map[string]any{}
+	}
+	if _, ok := s.Extra["warn_below"]; !ok {
+		s.Extra["warn_below"] = t.warn
+	}
+	if _, ok := s.Extra["crit_below"]; !ok {
+		s.Extra["crit_below"] = t.crit
+	}
+	return s, nil
+}
+
+func build(m config.Monitor, oauthMgr *oauth.Manager) (Provider, error) {
 	switch m.Provider {
 	case "deepseek":
 		return newDeepSeek(m), nil
