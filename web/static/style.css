@@ -151,6 +151,14 @@ main { padding: 18px clamp(16px, 4vw, 48px) 40px; }
   font-size: 10px; font-weight: 400; text-transform: uppercase; letter-spacing: 1.2px;
   color: var(--txt-dim); border-bottom: 1px solid var(--border);
 }
+.credit-table th button {
+  font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+  background: none; border: none; padding: 0; cursor: pointer;
+}
+.credit-table th button:hover, .credit-table th.sorted button { color: var(--txt); }
+.credit-table th button::after { content: " ↕"; opacity: 0.35; }
+.credit-table th[aria-sort="ascending"] button::after { content: " ▲"; opacity: 1; }
+.credit-table th[aria-sort="descending"] button::after { content: " ▼"; opacity: 1; }
 .credit-table td { border-bottom: 1px solid var(--border); }
 .credit-table tbody tr:last-child td { border-bottom: none; }
 .credit-table tbody tr:hover { background: rgba(51, 255, 102, 0.04); }

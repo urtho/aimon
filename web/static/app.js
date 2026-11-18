@@ -178,9 +178,62 @@
     return (p > 0 ? "+" : "") + v + "%";
   };
 
+  // Sort: click a header to sort by it, click again to flip. Default: % above
+  // threshold, highest first. Rows without a value always go last.
+  const SORT_KEY = "aimon.creditSort";
+  let creditSort = { key: "pct", dir: "desc" };
+  try {
+    const saved = JSON.parse(localStorage.getItem(SORT_KEY) || "null");
+    if (saved && saved.key && (saved.dir === "asc" || saved.dir === "desc")) creditSort = saved;
+  } catch (_) {}
+  let lastCredits = [];
+
+  const sortValue = (s, key) => {
+    switch (key) {
+      case "name": return s.label || "";
+      case "network": return (s.extra && s.extra.network) || "API";
+      case "left": return s.ok && s.balance != null ? s.balance : null;
+      default: return creditState(s).pct;
+    }
+  };
+
+  function sortCredits(list) {
+    const { key, dir } = creditSort;
+    const sign = dir === "asc" ? 1 : -1;
+    return list
+      .map((s, i) => ({ s, i, v: sortValue(s, key) }))
+      .sort((a, b) => {
+        if (a.v == null || b.v == null) return a.v == null ? (b.v == null ? a.i - b.i : 1) : -1;
+        const c = typeof a.v === "string" ? a.v.localeCompare(b.v, undefined, { sensitivity: "base" }) : a.v - b.v;
+        return c !== 0 ? sign * c : a.i - b.i;
+      })
+      .map((x) => x.s);
+  }
+
+  function paintSortHeaders() {
+    document.querySelectorAll(".credit-table th[data-sort]").forEach((th) => {
+      const on = th.dataset.sort === creditSort.key;
+      th.setAttribute("aria-sort", on ? (creditSort.dir === "asc" ? "ascending" : "descending") : "none");
+      th.classList.toggle("sorted", on);
+    });
+  }
+
+  document.querySelectorAll(".credit-table th[data-sort] button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.parentElement.dataset.sort;
+      creditSort = creditSort.key === key
+        ? { key, dir: creditSort.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "name" || key === "network" ? "asc" : "desc" };
+      try { localStorage.setItem(SORT_KEY, JSON.stringify(creditSort)); } catch (_) {}
+      renderCredits(lastCredits);
+    });
+  });
+
   function renderCredits(list) {
+    lastCredits = list;
     creditsEl.hidden = list.length === 0;
-    creditRowsEl.replaceChildren(...list.map((s) => {
+    paintSortHeaders();
+    creditRowsEl.replaceChildren(...sortCredits(list).map((s) => {
       const st = creditState(s);
       const x = s.extra || {};
       const tr = document.createElement("tr");
