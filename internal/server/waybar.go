@@ -49,6 +49,15 @@ const (
 	waybarClassCritical = "critical"
 	waybarClassAuth     = "auth"
 	waybarClassError    = "error"
+
+	// waybarColorNeutral is a color key only, never a monitor class: the prefix
+	// and "/" of a percent token.
+	waybarColorNeutral = "neutral"
+
+	// waybarLongWindow splits a subscription's quota windows into its two bar
+	// values: anything shorter (5h session) is the short value, weekly and
+	// longer (Grok's monthly cycle) the long one.
+	waybarLongWindow int64 = 7 * 24 * 3600
 )
 
 var waybarClassRank = map[string]int{
@@ -65,11 +74,12 @@ var waybarClassRank = map[string]int{
 
 // Pango colors for Waybar `markup: pango`. Match ~/.config/waybar/style.css.
 var waybarPaceColor = map[string]string{
-	model.PaceBelow:  "#7dffb3",
-	model.PaceAt:     "#ffcc66",
-	model.PaceOver:   "#ff5555",
-	waybarClassAuth:  "#ffcc66",
-	waybarClassError: "#ff5555",
+	model.PaceBelow:    "#7dffb3",
+	model.PaceAt:       "#ffcc66",
+	model.PaceOver:     "#ff5555",
+	waybarClassAuth:    "#ffcc66",
+	waybarClassError:   "#ff5555",
+	waybarColorNeutral: "#ffffff",
 }
 
 var waybarIcons = map[string]string{
@@ -82,9 +92,10 @@ var waybarIcons = map[string]string{
 }
 
 // GET /api/waybar — Waybar custom-module JSON for the latest snapshots.
-// Subscription compact % / pace / tooltip use every timed quota window (5h
-// session and weekly alike), so the % is whichever window has the least
-// left. Optional filters: provider, label, kind (comma-separated,
+// A subscription's compact text shows quota left in its short and long windows
+// ("C 82%/63%"), each value colored by that window's own pace. Its class,
+// percentage and tooltip cover every timed window, so percentage is whichever
+// has the least left. Optional filters: provider, label, kind (comma-separated,
 // case-insensitive).
 func (s *Server) handleWaybar(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -184,7 +195,12 @@ func formatWaybar(list []model.Status, icons map[string]string, now time.Time) w
 		bars := barSpans(st.Spans, now)
 		pct := remainingPct(st, now)
 		cls := monitorClass(st, now)
-		text := compactText(st, icons[st.ID()], pct)
+		icon := icons[st.ID()]
+		if icon == "" {
+			icon = providerIcon(st.Provider)
+		}
+		vals := subscriptionValues(st, pct, now)
+		text := compactText(st, icon, vals)
 		detail := monitorDetail(st, now)
 		pace, _ := barPace(st, now)
 		if st.Kind == model.KindSubscription && pct != nil && *pct == 100 && st.OK && !st.NeedsAuth {
@@ -210,7 +226,7 @@ func formatWaybar(list []model.Status, icons map[string]string, now time.Time) w
 			UpdatedAt:  st.UpdatedAt,
 		}
 		out.Monitors = append(out.Monitors, wm)
-		texts = append(texts, colorize(text, cls))
+		texts = append(texts, compactMarkup(text, icon, vals, cls))
 		details = append(details, detail)
 		if waybarClassRank[cls] > waybarClassRank[class] {
 			class = cls
@@ -336,10 +352,73 @@ func colorize(text, class string) string {
 	return fmt.Sprintf(`<span color="%s">%s</span>`, color, html.EscapeString(text))
 }
 
-func compactText(s model.Status, icon string, pct *int) string {
-	if icon == "" {
-		icon = providerIcon(s.Provider)
+// barValue is one percent on the bar and the class that colors it.
+type barValue struct {
+	pct   int
+	class string
+}
+
+// subscriptionValues returns the percents a healthy subscription shows: short
+// window, then long. A monitor with one window has one value; windows of the
+// same group (1w, 1w opus) show the least left and the worst pace among them.
+// A subscription with no windows falls back to pct (its balance), and one with
+// nothing to show returns nil.
+func subscriptionValues(s model.Status, pct *int, now time.Time) []barValue {
+	if s.Kind != model.KindSubscription || !s.OK || s.NeedsAuth {
+		return nil
 	}
+	var short, long []model.Span
+	for _, sp := range barSpans(s.Spans, now) {
+		if sp.WindowSeconds() >= waybarLongWindow {
+			long = append(long, sp)
+		} else {
+			short = append(short, sp)
+		}
+	}
+	var out []barValue
+	for _, group := range [][]model.Span{short, long} {
+		if left, ok := tightestRemaining(group); ok {
+			p := *clampPctPtr(int(math.Round(left)))
+			pace, _ := model.Status{OK: true, Spans: group}.WorstPace(now)
+			out = append(out, barValue{p, valueClass(p, pace)})
+		}
+	}
+	if len(out) == 0 && pct != nil {
+		out = append(out, barValue{*pct, valueClass(*pct, "")})
+	}
+	return out
+}
+
+// valueClass is the pace ladder, except that 100% left is always green and 0%
+// left always red. A value with no pace ("") stays uncolored.
+func valueClass(pct int, pace string) string {
+	switch pct {
+	case 100:
+		return model.PaceBelow
+	case 0:
+		return model.PaceOver
+	}
+	return pace
+}
+
+// compactMarkup is the Pango form of compactText. A percent token has a white
+// prefix and "/" with each value in its own color; other tokens are one color.
+func compactMarkup(text, icon string, vals []barValue, class string) string {
+	if len(vals) == 0 {
+		return colorize(text, class)
+	}
+	var b strings.Builder
+	b.WriteString(colorize(icon+" ", waybarColorNeutral))
+	for i, v := range vals {
+		if i > 0 {
+			b.WriteString(colorize("/", waybarColorNeutral))
+		}
+		b.WriteString(colorize(fmt.Sprintf("%d%%", v.pct), v.class))
+	}
+	return b.String()
+}
+
+func compactText(s model.Status, icon string, vals []barValue) string {
 	switch {
 	case authExpired(s):
 		return icon + "!"
@@ -348,8 +427,12 @@ func compactText(s model.Status, icon string, pct *int) string {
 	case !s.OK:
 		return icon + " !"
 	case s.Kind == model.KindSubscription:
-		if pct != nil {
-			return fmt.Sprintf("%s %d%%", icon, *pct)
+		if len(vals) > 0 {
+			parts := make([]string, len(vals))
+			for i, v := range vals {
+				parts[i] = fmt.Sprintf("%d%%", v.pct)
+			}
+			return icon + " " + strings.Join(parts, "/")
 		}
 		return icon + " ok"
 	case s.Kind == model.KindCost:

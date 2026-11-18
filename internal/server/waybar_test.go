@@ -55,14 +55,11 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 		},
 	}
 	got := formatWaybar(list, nil, now)
-	if !strings.Contains(got.Text, "C 30%") || !strings.Contains(got.Text, "X 58%") || !strings.Contains(got.Text, "AI ?") {
-		t.Fatalf("text = %q (min of 5h / weekly remaining)", got.Text)
-	}
-	if strings.Contains(got.Text, "C 80%") {
-		t.Fatalf("text uses weekly remaining though 5h is tighter: %q", got.Text)
-	}
-	if !strings.Contains(got.Text, `<span color="#ff5555">C 30%</span>`) || !strings.Contains(got.Text, `<span color="#7dffb3">X 58%</span>`) {
-		t.Fatalf("text should pango-color by pace: %q", got.Text)
+	want := `<span color="#ffffff">C </span><span color="#ff5555">30%</span><span color="#ffffff">/</span><span color="#7dffb3">80%</span>` +
+		` · <span color="#ffffff">X </span><span color="#7dffb3">58%</span>` +
+		` · <span color="#ffcc66">AI ?</span>`
+	if got.Text != want {
+		t.Fatalf("text = %q, want %q", got.Text, want)
 	}
 	if got.Class != waybarClassAuth || got.Alt != waybarClassAuth {
 		t.Fatalf("class = %q (want auth: unconnected monitor is worst)", got.Class)
@@ -79,7 +76,7 @@ func TestFormatWaybarSubscriptions(t *testing.T) {
 	if !strings.Contains(got.Tooltip, "not connected") {
 		t.Fatalf("tooltip missing auth: %q", got.Tooltip)
 	}
-	if len(got.Monitors) != 3 || got.Monitors[0].Class != model.PaceOver || got.Monitors[0].Text != "C 30%" || got.Monitors[1].Text != "X 58%" || got.Monitors[1].Class != model.PaceBelow || got.Monitors[2].Class != waybarClassAuth {
+	if len(got.Monitors) != 3 || got.Monitors[0].Class != model.PaceOver || got.Monitors[0].Text != "C 30%/80%" || got.Monitors[1].Text != "X 58%" || got.Monitors[1].Class != model.PaceBelow || got.Monitors[2].Class != waybarClassAuth {
 		t.Fatalf("monitors = %+v", got.Monitors)
 	}
 	if p := got.Monitors[0].Percentage; p == nil || *p != 30 {
@@ -131,6 +128,56 @@ func TestFormatWaybarPace(t *testing.T) {
 	}
 }
 
+func TestFormatWaybarValueColors(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	const (
+		green = `<span color="#7dffb3">`
+		amber = `<span color="#ffcc66">`
+		red   = `<span color="#ff5555">`
+		end   = `</span>`
+		slash = `<span color="#ffffff">/</span>`
+	)
+	// 5h window with 1h elapsed → linear 20%; 1w window half elapsed → linear 50%.
+	session := func(used float64) model.Span {
+		return model.Span{Name: "5h", Used: used, ResetAt: now.Add(4 * time.Hour).Unix(), Duration: 5 * 3600}
+	}
+	week := func(used float64) model.Span {
+		return model.Span{Name: "1w", Used: used, ResetAt: now.Add(3*24*time.Hour + 12*time.Hour).Unix(), Duration: 7 * 24 * 3600}
+	}
+	// Linear 99%: 100 used is within the slack, so the pace alone would be "at".
+	weekNearlyOver := model.Span{Name: "1w", Used: 100, ResetAt: now.Add(100 * time.Minute).Unix(), Duration: 7 * 24 * 3600}
+
+	cases := []struct {
+		name  string
+		spans []model.Span
+		text  string
+		want  string
+	}{
+		{"each value has its own pace", []model.Span{session(10), week(50)}, "C 90%/50%", green + "90%" + end + slash + amber + "50%" + end},
+		{"short over, long below", []model.Span{session(40), week(10)}, "C 60%/90%", red + "60%" + end + slash + green + "90%" + end},
+		{"100% is green", []model.Span{session(0), week(50)}, "C 100%/50%", green + "100%" + end + slash + amber + "50%" + end},
+		{"100% with no reset known is green", []model.Span{{Name: "5h", Duration: 5 * 3600}, week(50)}, "C 100%/50%", green + "100%" + end + slash + amber + "50%" + end},
+		{"0% is red though pace is at", []model.Span{session(10), weekNearlyOver}, "C 90%/0%", green + "90%" + end + slash + red + "0%" + end},
+		{"no pace stays uncolored", []model.Span{{Name: "5h", Used: 30, Duration: 5 * 3600}, week(50)}, "C 70%/50%", "70%" + slash + amber + "50%" + end},
+		{"long window only", []model.Span{week(50)}, "C 50%", amber + "50%" + end},
+		{"short window only", []model.Span{session(10)}, "C 90%", green + "90%" + end},
+		{"monthly counts as long", []model.Span{session(10), {Name: "1mo", Used: 75, Duration: 30 * 24 * 3600}}, "C 90%/25%", green + "90%" + end + slash + "25%"},
+		{"group shows least left and worst pace", []model.Span{session(10), week(10), {Name: "1w opus", Used: 50, ResetAt: week(0).ResetAt, Duration: 7 * 24 * 3600}}, "C 90%/50%", green + "90%" + end + slash + amber + "50%" + end},
+		{"unwindowed meter is ignored", []model.Span{session(10), {Name: "extra_usage", Used: 99}}, "C 90%", green + "90%" + end},
+	}
+	for _, tc := range cases {
+		got := formatWaybar([]model.Status{{
+			Provider: "claude", Label: "Claude", Kind: model.KindSubscription, OK: true, Spans: tc.spans,
+		}}, nil, now)
+		if got.Monitors[0].Text != tc.text {
+			t.Errorf("%s: monitor text = %q, want %q", tc.name, got.Monitors[0].Text, tc.text)
+		}
+		if want := `<span color="#ffffff">C </span>` + tc.want; got.Text != want {
+			t.Errorf("%s: text = %q, want %q", tc.name, got.Text, want)
+		}
+	}
+}
+
 func TestFormatWaybarSessionOnlyFallback(t *testing.T) {
 	// No weekly window (Claude Team seat): the session alone drives the bar.
 	now := time.Unix(1_700_000_000, 0)
@@ -139,8 +186,8 @@ func TestFormatWaybarSessionOnlyFallback(t *testing.T) {
 		Used: fptr(95), Total: fptr(100), Balance: fptr(5),
 		Spans: []model.Span{{Name: "5h", Used: 95, ResetAt: now.Add(1 * time.Hour).Unix(), Duration: 5 * 3600}},
 	}}, nil, now)
-	if !strings.Contains(got.Text, "C 5%") {
-		t.Fatalf("session-only should show 5h remaining: %q", got.Text)
+	if got.Monitors[0].Text != "C 5%" {
+		t.Fatalf("session-only should show 5h remaining: %q", got.Monitors[0].Text)
 	}
 	if got.Percentage == nil || *got.Percentage != 5 {
 		t.Fatalf("session-only percentage = %v, want 5", got.Percentage)
@@ -181,8 +228,8 @@ func TestFormatWaybarRolledOverSessionIsFresh(t *testing.T) {
 			{Name: "1w", Used: 6, ResetAt: now.Add(6 * 24 * time.Hour).Unix(), Duration: 7 * 24 * 3600},
 		},
 	}}, nil, now)
-	if got.Percentage == nil || *got.Percentage != 94 || !strings.Contains(got.Text, "C 94%") {
-		t.Fatalf("percentage = %v text = %q, want 94 (week; 5h has reset)", got.Percentage, got.Text)
+	if got.Percentage == nil || *got.Percentage != 94 || got.Monitors[0].Text != "C 100%/94%" {
+		t.Fatalf("percentage = %v text = %q, want 94 and C 100%%/94%% (5h has reset)", got.Percentage, got.Monitors[0].Text)
 	}
 	if got.Class == model.PaceOver {
 		t.Fatalf("class = %q: a reset session must not score over", got.Class)
@@ -306,15 +353,15 @@ func TestMonitorIconsNumbersSecondSeat(t *testing.T) {
 		t.Fatalf("icons = %v", icons)
 	}
 	got := formatWaybar(all, nil, now)
-	if !strings.Contains(got.Text, "C 80%") || !strings.Contains(got.Text, "C2 30%") ||
-		!strings.Contains(got.Text, "C3 50%") || !strings.Contains(got.Text, "C4 90%") {
-		t.Fatalf("text = %q", got.Text)
+	if got.Monitors[0].Text != "C 80%" || got.Monitors[2].Text != "C2 30%" ||
+		got.Monitors[3].Text != "C3 50%" || got.Monitors[4].Text != "C4 90%" {
+		t.Fatalf("monitors = %+v", got.Monitors)
 	}
 	// Filtering to the team seat alone must keep its C2 token.
 	team := filterStatuses(all, "", "claude (team)", "")
 	got = formatWaybar(team, icons, now)
-	if !strings.Contains(got.Text, "C2 30%") || strings.Contains(got.Text, "C 80%") {
-		t.Fatalf("filtered text = %q", got.Text)
+	if len(got.Monitors) != 1 || got.Monitors[0].Text != "C2 30%" {
+		t.Fatalf("filtered monitors = %+v", got.Monitors)
 	}
 }
 
@@ -329,7 +376,7 @@ func TestFormatWaybarFullQuotaIsGreen(t *testing.T) {
 	if got.Class != model.PaceBelow || got.Monitors[0].Pace != model.PaceBelow {
 		t.Fatalf("class = %q pace = %q, want below", got.Class, got.Monitors[0].Pace)
 	}
-	if !strings.Contains(got.Text, `color="#7dffb3"`) || !strings.Contains(got.Text, "C 100%") {
+	if !strings.Contains(got.Text, `<span color="#7dffb3">100%</span>`) || got.Monitors[0].Text != "C 100%" {
 		t.Fatalf("100%% should be green: %q", got.Text)
 	}
 	if strings.Contains(got.Text, `color="#ffcc66"`) || strings.Contains(got.Text, `color="#ff5555"`) {
@@ -349,7 +396,7 @@ func TestFormatWaybarFullQuotaWithoutWindowIsGreen(t *testing.T) {
 	if got.Class != model.PaceBelow || got.Monitors[0].Class != model.PaceBelow {
 		t.Fatalf("class = %q monitor = %q, want below", got.Class, got.Monitors[0].Class)
 	}
-	if !strings.Contains(got.Text, `color="#7dffb3"`) || !strings.Contains(got.Text, "AI 100%") {
+	if !strings.Contains(got.Text, `<span color="#7dffb3">100%</span>`) || got.Monitors[0].Text != "AI 100%" {
 		t.Fatalf("balance-only 100%% should be green: %q", got.Text)
 	}
 }
