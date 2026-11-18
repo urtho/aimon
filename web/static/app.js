@@ -179,9 +179,9 @@
   };
 
   // Sort: click a header to sort by it, click again to flip. Default: % above
-  // threshold, highest first. Rows without a value always go last.
-  const SORT_KEY = "aimon.creditSort";
-  let creditSort = { key: "pct", dir: "desc" };
+  // threshold, lowest first (closest to running dry). Rows without a value go last.
+  const SORT_KEY = "aimon.creditSort.v2";
+  let creditSort = { key: "pct", dir: "asc" };
   try {
     const saved = JSON.parse(localStorage.getItem(SORT_KEY) || "null");
     if (saved && saved.key && (saved.dir === "asc" || saved.dir === "desc")) creditSort = saved;
@@ -223,7 +223,7 @@
       const key = btn.parentElement.dataset.sort;
       creditSort = creditSort.key === key
         ? { key, dir: creditSort.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: key === "name" || key === "network" ? "asc" : "desc" };
+        : { key, dir: key === "left" ? "desc" : "asc" };
       try { localStorage.setItem(SORT_KEY, JSON.stringify(creditSort)); } catch (_) {}
       renderCredits(lastCredits);
     });
