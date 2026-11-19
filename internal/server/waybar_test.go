@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -420,5 +421,35 @@ func TestFormatWaybarAuthExpired(t *testing.T) {
 	}
 	if !strings.Contains(got.Tooltip, "login expired — reconnect") {
 		t.Fatalf("tooltip = %q", got.Tooltip)
+	}
+}
+
+func TestFormatWaybarWindows(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	session := model.Span{Name: "5h", Used: 40, ResetAt: now.Add(4 * time.Hour).Unix(), Duration: 5 * 3600}
+	week := model.Span{Name: "1w", Used: 10, ResetAt: now.Add(3*24*time.Hour + 12*time.Hour).Unix(), Duration: 7 * 24 * 3600}
+	cases := []struct {
+		name string
+		st   model.Status
+		want []waybarWindow
+	}{
+		{"short and long", model.Status{Spans: []model.Span{session, week}},
+			[]waybarWindow{{"short", 60, model.PaceOver}, {"long", 90, model.PaceBelow}}},
+		{"long only", model.Status{Spans: []model.Span{week}}, []waybarWindow{{"long", 90, model.PaceBelow}}},
+		{"no window falls back to balance", model.Status{Used: fptr(30), Total: fptr(100), Balance: fptr(70)},
+			[]waybarWindow{{"balance", 70, ""}}},
+		{"needs auth has none", model.Status{NeedsAuth: true, Spans: []model.Span{week}}, nil},
+	}
+	for _, tc := range cases {
+		st := tc.st
+		st.Provider, st.Label, st.Kind, st.OK = "claude", "Claude", model.KindSubscription, true
+		got := formatWaybar([]model.Status{st}, nil, now).Monitors[0].Windows
+		if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+			t.Errorf("%s: windows = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	credit := formatWaybar([]model.Status{{Provider: "deepseek", Label: "DS", Kind: model.KindCredit, OK: true, Balance: fptr(5)}}, nil, now)
+	if credit.Monitors[0].Windows != nil {
+		t.Errorf("credit monitor has windows: %v", credit.Monitors[0].Windows)
 	}
 }

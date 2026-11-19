@@ -39,7 +39,19 @@ type waybarMonitor struct {
 	Percentage *int         `json:"percentage,omitempty"`
 	Plan       string       `json:"plan,omitempty"`
 	Spans      []model.Span `json:"spans,omitempty"`
-	UpdatedAt  int64        `json:"updated_at,omitempty"`
+	// Windows are the values the bar shows for a healthy subscription: the
+	// short window, then the long one, each with its own pace class. Gadgets
+	// (apcmon) read these instead of redoing the quota math.
+	Windows   []waybarWindow `json:"windows,omitempty"`
+	UpdatedAt int64          `json:"updated_at,omitempty"`
+}
+
+// waybarWindow is one bar value: group "short" (<1w), "long" (>=1w) or
+// "balance" (a subscription with no timed window).
+type waybarWindow struct {
+	Group string `json:"group"`
+	Left  int    `json:"left"`
+	Class string `json:"class,omitempty"`
 }
 
 const (
@@ -223,6 +235,7 @@ func formatWaybar(list []model.Status, icons map[string]string, now time.Time) w
 			Percentage: pct,
 			Plan:       st.Plan,
 			Spans:      bars,
+			Windows:    windowsOf(vals),
 			UpdatedAt:  st.UpdatedAt,
 		}
 		out.Monitors = append(out.Monitors, wm)
@@ -356,6 +369,7 @@ func colorize(text, class string) string {
 type barValue struct {
 	pct   int
 	class string
+	group string
 }
 
 // subscriptionValues returns the percents a healthy subscription shows: short
@@ -376,15 +390,26 @@ func subscriptionValues(s model.Status, pct *int, now time.Time) []barValue {
 		}
 	}
 	var out []barValue
-	for _, group := range [][]model.Span{short, long} {
+	for i, group := range [][]model.Span{short, long} {
 		if left, ok := tightestRemaining(group); ok {
 			p := *clampPctPtr(int(math.Round(left)))
 			pace, _ := model.Status{OK: true, Spans: group}.WorstPace(now)
-			out = append(out, barValue{p, valueClass(p, pace)})
+			out = append(out, barValue{p, valueClass(p, pace), [2]string{"short", "long"}[i]})
 		}
 	}
 	if len(out) == 0 && pct != nil {
-		out = append(out, barValue{*pct, valueClass(*pct, "")})
+		out = append(out, barValue{*pct, valueClass(*pct, ""), "balance"})
+	}
+	return out
+}
+
+func windowsOf(vals []barValue) []waybarWindow {
+	if len(vals) == 0 {
+		return nil
+	}
+	out := make([]waybarWindow, len(vals))
+	for i, v := range vals {
+		out[i] = waybarWindow{Group: v.group, Left: v.pct, Class: v.class}
 	}
 	return out
 }
