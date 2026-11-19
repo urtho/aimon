@@ -48,10 +48,20 @@ type waybarMonitor struct {
 
 // waybarWindow is one bar value: group "short" (<1w), "long" (>=1w) or
 // "balance" (a subscription with no timed window).
+//
+// Window is the tightest span's length ("5h", "7d"), ResetAt its reset (unix
+// s), LinearLeft the % a straight-line burn would leave now and Delta the
+// points ahead of that line (linear used − used, worst span of the group:
+// negative = burning faster). The last three are absent with no reset time;
+// Delta is 0 for an untouched window without one.
 type waybarWindow struct {
-	Group string `json:"group"`
-	Left  int    `json:"left"`
-	Class string `json:"class,omitempty"`
+	Group      string `json:"group"`
+	Left       int    `json:"left"`
+	Class      string `json:"class,omitempty"`
+	Window     string `json:"window,omitempty"`
+	ResetAt    int64  `json:"reset_at,omitempty"`
+	LinearLeft *int   `json:"linear_left,omitempty"`
+	Delta      *int   `json:"delta,omitempty"`
 }
 
 const (
@@ -370,6 +380,7 @@ type barValue struct {
 	pct   int
 	class string
 	group string
+	win   waybarWindow // window, reset, linear left, delta (gadgets only)
 }
 
 // subscriptionValues returns the percents a healthy subscription shows: short
@@ -394,11 +405,11 @@ func subscriptionValues(s model.Status, pct *int, now time.Time) []barValue {
 		if left, ok := tightestRemaining(group); ok {
 			p := *clampPctPtr(int(math.Round(left)))
 			pace, _ := model.Status{OK: true, Spans: group}.WorstPace(now)
-			out = append(out, barValue{p, valueClass(p, pace), [2]string{"short", "long"}[i]})
+			out = append(out, barValue{p, valueClass(p, pace), [2]string{"short", "long"}[i], groupDetail(group, p, now)})
 		}
 	}
 	if len(out) == 0 && pct != nil {
-		out = append(out, barValue{*pct, valueClass(*pct, ""), "balance"})
+		out = append(out, barValue{*pct, valueClass(*pct, ""), "balance", waybarWindow{}})
 	}
 	return out
 }
@@ -409,9 +420,47 @@ func windowsOf(vals []barValue) []waybarWindow {
 	}
 	out := make([]waybarWindow, len(vals))
 	for i, v := range vals {
-		out[i] = waybarWindow{Group: v.group, Left: v.pct, Class: v.class}
+		w := v.win
+		w.Group, w.Left, w.Class = v.group, v.pct, v.class
+		out[i] = w
 	}
 	return out
+}
+
+// groupDetail describes a window group (see waybarWindow): the tightest span
+// sets the label, reset and linear left; Delta is the worst across the group.
+func groupDetail(group []model.Span, left int, now time.Time) waybarWindow {
+	tight := group[0]
+	for _, sp := range group[1:] {
+		if sp.Used > tight.Used {
+			tight = sp
+		}
+	}
+	w := waybarWindow{Window: windowLabel(tight.WindowSeconds())}
+	if lin, ok := tight.LinearUsed(now); ok {
+		w.ResetAt = tight.ResetAt
+		w.LinearLeft = clampPctPtr(int(math.Round(100 - lin)))
+	}
+	for _, sp := range group {
+		if lin, ok := sp.LinearUsed(now); ok {
+			d := int(math.Round(lin - sp.Used))
+			if w.Delta == nil || d < *w.Delta {
+				w.Delta = &d
+			}
+		}
+	}
+	if w.Delta == nil && left == 100 {
+		zero := 0
+		w.Delta = &zero
+	}
+	return w
+}
+
+func windowLabel(secs int64) string {
+	if secs >= 86400 {
+		return fmt.Sprintf("%dd", secs/86400)
+	}
+	return fmt.Sprintf("%dh", secs/3600)
 }
 
 // valueClass is the pace ladder, except that 100% left is always green and 0%

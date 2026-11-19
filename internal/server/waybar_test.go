@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -434,22 +433,39 @@ func TestFormatWaybarWindows(t *testing.T) {
 		want []waybarWindow
 	}{
 		{"short and long", model.Status{Spans: []model.Span{session, week}},
-			[]waybarWindow{{"short", 60, model.PaceOver}, {"long", 90, model.PaceBelow}}},
-		{"long only", model.Status{Spans: []model.Span{week}}, []waybarWindow{{"long", 90, model.PaceBelow}}},
+			[]waybarWindow{
+				{Group: "short", Left: 60, Class: model.PaceOver, Window: "5h", ResetAt: session.ResetAt, LinearLeft: iptr(80), Delta: iptr(-20)},
+				{Group: "long", Left: 90, Class: model.PaceBelow, Window: "7d", ResetAt: week.ResetAt, LinearLeft: iptr(50), Delta: iptr(40)},
+			}},
+		{"long only", model.Status{Spans: []model.Span{week}},
+			[]waybarWindow{{Group: "long", Left: 90, Class: model.PaceBelow, Window: "7d", ResetAt: week.ResetAt, LinearLeft: iptr(50), Delta: iptr(40)}}},
+		{"untouched without reset: delta 0", model.Status{Spans: []model.Span{{Name: "5h", Duration: 5 * 3600}}},
+			[]waybarWindow{{Group: "short", Left: 100, Class: model.PaceBelow, Window: "5h", Delta: iptr(0)}}},
 		{"no window falls back to balance", model.Status{Used: fptr(30), Total: fptr(100), Balance: fptr(70)},
-			[]waybarWindow{{"balance", 70, ""}}},
+			[]waybarWindow{{Group: "balance", Left: 70}}},
 		{"needs auth has none", model.Status{NeedsAuth: true, Spans: []model.Span{week}}, nil},
 	}
 	for _, tc := range cases {
 		st := tc.st
 		st.Provider, st.Label, st.Kind, st.OK = "claude", "Claude", model.KindSubscription, true
 		got := formatWaybar([]model.Status{st}, nil, now).Monitors[0].Windows
-		if fmt.Sprint(got) != fmt.Sprint(tc.want) {
-			t.Errorf("%s: windows = %v, want %v", tc.name, got, tc.want)
+		if g, w := windowsJSON(t, got), windowsJSON(t, tc.want); g != w {
+			t.Errorf("%s: windows = %s, want %s", tc.name, g, w)
 		}
 	}
 	credit := formatWaybar([]model.Status{{Provider: "deepseek", Label: "DS", Kind: model.KindCredit, OK: true, Balance: fptr(5)}}, nil, now)
 	if credit.Monitors[0].Windows != nil {
 		t.Errorf("credit monitor has windows: %v", credit.Monitors[0].Windows)
 	}
+}
+
+func iptr(v int) *int { return &v }
+
+func windowsJSON(t *testing.T, w []waybarWindow) string {
+	t.Helper()
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
