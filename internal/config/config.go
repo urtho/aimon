@@ -43,7 +43,7 @@ type Monitor struct {
 	PollInterval time.Duration `yaml:"poll_interval"`
 
 	// Credit/cost providers.
-	APIKey   string `yaml:"api_key"`   // DeepSeek, OpenRouter, x.ai, ElevenLabs, Serper
+	APIKey   string `yaml:"api_key"`   // DeepSeek, OpenRouter, x.ai, ElevenLabs, Serper; Algorand wallet: node token
 	AdminKey string `yaml:"admin_key"` // Anthropic Admin API (sk-ant-admin-...)
 
 	// Anthropic has no public prepaid-balance API. Set credit_balance to the

@@ -20,6 +20,15 @@ func TestWalletAlgorandSpendable(t *testing.T) {
 	}
 }
 
+func TestWalletAlgorandSendsNodeToken(t *testing.T) {
+	srv := fakeAPI(t, "/v2/accounts/AAA", "X-Algo-API-Token", "tok", 200, `{"amount":1000000,"min-balance":100000}`)
+	st, err := newWallet(config.Monitor{Label: "N", Chain: "algorand", Addresses: []string{"AAA"}, BaseURL: srv.URL,
+		APIKey: "tok"}).Fetch(context.Background())
+	if err != nil || math.Abs(*st.Balance-0.9) > 1e-9 {
+		t.Fatalf("status = %+v err %v", st, err)
+	}
+}
+
 func TestWalletEVMReportsLowest(t *testing.T) {
 	srv := fakeAPI(t, "/", "", "", 200, `[{"id":1,"result":"0xde0b6b3a7640000"},{"id":2,"result":"0x6f05b59d3b20000"}]`)
 	st, err := newWallet(config.Monitor{Label: "G", Chain: "evm", Unit: "ETH", Addresses: []string{"0xa", "0xb"},

@@ -21,6 +21,7 @@ type wallet struct {
 	addresses []string
 	base      string
 	unit      string
+	token     string // Algorand: sent as X-Algo-API-Token (Nodely API token; unkeyed calls share a per-IP free quota)
 	warn      float64
 	crit      float64
 }
@@ -39,7 +40,7 @@ func newWallet(m config.Monitor) *wallet {
 		network = map[string]string{"algorand": "Algorand", "evm": "EVM"}[m.Chain]
 	}
 	return &wallet{label: m.Label, chain: m.Chain, network: network, addresses: m.Addresses, base: strings.TrimRight(base, "/"),
-		unit: unit, warn: m.WarnBelow, crit: m.CritBelow}
+		unit: unit, token: m.APIKey, warn: m.WarnBelow, crit: m.CritBelow}
 }
 
 func (w *wallet) ID() string    { return "wallet" }
@@ -87,13 +88,17 @@ func (w *wallet) Fetch(ctx context.Context) (model.Status, error) {
 // algorand returns what each account can spend: its amount less the minimum
 // balance the protocol locks.
 func (w *wallet) algorand(ctx context.Context) ([]float64, error) {
+	var headers map[string]string
+	if w.token != "" {
+		headers = map[string]string{"X-Algo-API-Token": w.token}
+	}
 	out := make([]float64, 0, len(w.addresses))
 	for _, addr := range w.addresses {
 		var body struct {
 			Amount     *int64 `json:"amount"`
 			MinBalance int64  `json:"min-balance"`
 		}
-		code, raw, err := getJSON(ctx, w.base+"/v2/accounts/"+addr+"?exclude=all", nil, &body)
+		code, raw, err := getJSON(ctx, w.base+"/v2/accounts/"+addr+"?exclude=all", headers, &body)
 		if code == 0 {
 			return nil, err
 		}
